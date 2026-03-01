@@ -173,6 +173,12 @@ int ds_config_load(const char *config_path, struct ds_config *cfg) {
       cfg->foreground = parse_bool(val, key);
     } else if (strcmp(key, "pidfile") == 0) {
       safe_strncpy(cfg->pidfile, val, sizeof(cfg->pidfile));
+    } else if (strcmp(key, "env_file") == 0) {
+      if (strstr(val, "..")) {
+        ds_warn("Config: Path traversal attempt in env_file: %s", val);
+        continue;
+      }
+      safe_strncpy(cfg->env_file, val, sizeof(cfg->env_file));
     }
   }
 
@@ -194,6 +200,7 @@ static const char *KNOWN_KEYS[] = {"name",
                                    "foreground",
                                    "bind_mounts",
                                    "dns_servers",
+                                   "env_file",
                                    NULL};
 
 /* Linked list to store unknown key-value pairs from existing config */
@@ -300,6 +307,9 @@ int ds_config_save(const char *config_path, struct ds_config *cfg) {
   fprintf(f_out, "selinux_permissive=%d\n", cfg->selinux_permissive);
   fprintf(f_out, "volatile_mode=%d\n", cfg->volatile_mode);
   fprintf(f_out, "foreground=%d\n", cfg->foreground);
+
+  if (cfg->env_file[0])
+    fprintf(f_out, "env_file=%s\n", cfg->env_file);
 
   if (cfg->dns_servers[0])
     fprintf(f_out, "dns_servers=%s\n", cfg->dns_servers);

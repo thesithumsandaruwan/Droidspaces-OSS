@@ -46,6 +46,7 @@ void print_usage(void) {
       "  -d, --dns=SERVERS         Set custom DNS servers (comma separated)\n");
   printf("  -f, --foreground          Run in foreground (attach console)\n");
   printf("  -V, --volatile            Discard changes on exit (OverlayFS)\n");
+  printf("  -E, --env=PATH            Load environment variables from file\n");
   printf(
       "  -X, --termux-x11          Enable Termux-X11 support (Android only)\n");
   printf(
@@ -115,6 +116,7 @@ int main(int argc, char **argv) {
       {"bind-mount", required_argument, 0, 'B'},
       {"conf", required_argument, 0, 'C'},
       {"config", required_argument, 0, 'C'},
+      {"env", required_argument, 0, 'E'},
       {"help", no_argument, 0, 'v'},
       {0, 0, 0, 0}};
 
@@ -130,8 +132,8 @@ int main(int argc, char **argv) {
   const char *discovered_cmd = NULL;
   int temp_optind = optind;
   int opt;
-  while ((opt = getopt_long(argc, argv, "+r:i:n:p:h:d:fHXPvVB:C:", long_options,
-                            NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "+r:i:n:p:h:d:fHXPvVB:C:E:",
+                            long_options, NULL)) != -1) {
     if (opt == 'C') {
       safe_strncpy(cfg.config_file, optarg, sizeof(cfg.config_file));
       cfg.config_file_specified = 1;
@@ -148,7 +150,7 @@ int main(int argc, char **argv) {
     /* Auto-detect config from CLI rootfs arguments (preview only) */
     char temp_r[PATH_MAX] = {0}, temp_i[PATH_MAX] = {0};
     int t_optind = optind;
-    while ((opt = getopt_long(argc, argv, "+r:i:n:p:h:d:fHXPvVB:C:",
+    while ((opt = getopt_long(argc, argv, "+r:i:n:p:h:d:fHXPvVB:C:E:",
                               long_options, NULL)) != -1) {
       if (opt == 'r')
         safe_strncpy(temp_r, optarg, sizeof(temp_r));
@@ -168,7 +170,7 @@ int main(int argc, char **argv) {
   /* Re-parse CLI to apply overrides on top of loaded configuration */
   int strict = (discovered_cmd && (strcmp(discovered_cmd, "run") == 0));
   const char *optstring =
-      strict ? "+r:i:n:p:h:d:fHXPvVB:C:" : "r:i:n:p:h:d:fHXPvVB:C:";
+      strict ? "+r:i:n:p:h:d:fHXPvVB:C:E:" : "r:i:n:p:h:d:fHXPvVB:C:E:";
 
   while ((opt = getopt_long(argc, argv, optstring, long_options, NULL)) != -1) {
     switch (opt) {
@@ -190,6 +192,9 @@ int main(int argc, char **argv) {
       break;
     case 'h':
       safe_strncpy(cfg.hostname, optarg, sizeof(cfg.hostname));
+      break;
+    case 'E':
+      safe_strncpy(cfg.env_file, optarg, sizeof(cfg.env_file));
       break;
     case 'd':
       safe_strncpy(cfg.dns_servers, optarg, sizeof(cfg.dns_servers));

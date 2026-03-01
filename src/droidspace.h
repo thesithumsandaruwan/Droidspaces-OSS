@@ -162,6 +162,11 @@ struct ds_bind_mount {
   char dest[PATH_MAX];
 };
 
+struct ds_env_var {
+  char *key;
+  char *value;
+};
+
 /* Terminal/TTY info — one per allocated PTY */
 struct ds_tty_info {
   int master;          /* master fd (stays in parent/monitor) */
@@ -213,6 +218,12 @@ struct ds_config {
   struct ds_tty_info console;
   struct ds_tty_info ttys[DS_MAX_TTYS];
   int tty_count; /* how many TTYs are active */
+
+  /* Environment variables (dynamically allocated) */
+  char env_file[PATH_MAX];
+  struct ds_env_var *env_vars;
+  int env_var_count;
+  int env_var_capacity;
 };
 
 /* ---------------------------------------------------------------------------
@@ -375,9 +386,11 @@ int internal_boot(struct ds_config *cfg);
  * environment.c
  * ---------------------------------------------------------------------------*/
 
-void setup_container_env(void);
 void load_etc_environment(void);
 void ds_env_boot_setup(struct ds_config *cfg);
+void ds_env_save(const char *path, struct ds_config *cfg);
+void parse_env_file_to_config(const char *path, struct ds_config *cfg);
+void free_config_env_vars(struct ds_config *cfg);
 
 /* ---------------------------------------------------------------------------
  * container.c

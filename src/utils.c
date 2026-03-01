@@ -7,8 +7,8 @@
 
 #include "droidspace.h"
 #include <ftw.h>
-#include <time.h>
 #include <sys/xattr.h>
+#include <time.h>
 
 /* ---------------------------------------------------------------------------
  * String helpers

@@ -250,6 +250,12 @@ int start_rootfs(struct ds_config *cfg) {
 
   generate_uuid(cfg->uuid, sizeof(cfg->uuid));
 
+  /* Parse environment file while host paths are reachable (before pivot_root)
+   */
+  if (cfg->env_file[0] != '\0') {
+    parse_env_file_to_config(cfg->env_file, cfg);
+  }
+
   /* Pre-populate volatile_dir for monitor cleanup (actual overlay setup
    * happens inside internal_boot's isolated mount namespace) */
   if (cfg->volatile_mode) {
@@ -493,6 +499,7 @@ int start_rootfs(struct ds_config *cfg) {
 
     int ret = console_monitor_loop(cfg->console.master, monitor_pid,
                                    cfg->container_pid);
+    free_config_env_vars(cfg);
     return ret;
   } else {
     /* Wait for container to finish pivot_root before showing info.
@@ -533,6 +540,7 @@ int start_rootfs(struct ds_config *cfg) {
     }
   }
 
+  free_config_env_vars(cfg);
   return 0;
 }
 
@@ -695,6 +703,11 @@ int enter_rootfs(struct ds_config *cfg, const char *user) {
   if (check_status(cfg, &pid) < 0)
     return -1;
 
+  /* Parse environment file while host paths are reachable */
+  if (cfg->env_file[0] != '\0') {
+    parse_env_file_to_config(cfg->env_file, cfg);
+  }
+
   ds_log("Entering container '%s' as %s...", cfg->container_name,
          user ? user : "root");
 
@@ -760,8 +773,8 @@ int enter_rootfs(struct ds_config *cfg, const char *user) {
       if (chdir("/") < 0)
         exit(EXIT_FAILURE);
 
-      setup_container_env();
-      setenv("LANG", "C.UTF-8", 1);
+      /* Apply fixed and user-defined environment */
+      ds_env_boot_setup(cfg);
       load_etc_environment();
 
       extern char **environ;
@@ -825,6 +838,7 @@ int enter_rootfs(struct ds_config *cfg, const char *user) {
 
   close(master_fd);
   waitpid(child, NULL, 0);
+  free_config_env_vars(cfg);
   return 0;
 }
 
@@ -835,6 +849,11 @@ int run_in_rootfs(struct ds_config *cfg, int argc, char **argv) {
     return -1;
 
   /* Removed verbose status log to allow raw output stream */
+
+  /* Parse environment file while host paths are reachable */
+  if (cfg->env_file[0] != '\0') {
+    parse_env_file_to_config(cfg->env_file, cfg);
+  }
 
   pid_t child = fork();
   if (child < 0)
@@ -851,7 +870,8 @@ int run_in_rootfs(struct ds_config *cfg, int argc, char **argv) {
       if (chdir("/") < 0)
         exit(EXIT_FAILURE);
 
-      setup_container_env();
+      /* Setup environment */
+      ds_env_boot_setup(cfg);
       load_etc_environment();
 
       /* If single argument with spaces, run via /bin/sh -c */
@@ -873,6 +893,7 @@ int run_in_rootfs(struct ds_config *cfg, int argc, char **argv) {
 
   int status;
   waitpid(child, &status, 0);
+  free_config_env_vars(cfg);
   return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 

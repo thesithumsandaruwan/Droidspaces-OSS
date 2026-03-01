@@ -290,6 +290,17 @@ int internal_boot(struct ds_config *cfg) {
 
   /* 23. Clear environment and set container defaults */
   ds_env_boot_setup(cfg);
+  ds_env_save("/run/droidspaces.env", cfg);
+
+  /* 23b. Integration with /etc/profile.d for universal sourcing */
+  if (access("/etc/profile.d", F_OK) == 0) {
+    const char *profile_link = "/etc/profile.d/droidspaces_env.sh";
+    if (access(profile_link, F_OK) != 0) {
+      if (symlink("/run/droidspaces.env", profile_link) < 0) {
+        ds_warn("Failed to create profile.d symlink: %s", strerror(errno));
+      }
+    }
+  }
 
   /* 24. Redirect standard I/O to /dev/console */
   int console_fd = open("/dev/console", O_RDWR);
