@@ -155,19 +155,21 @@ static int auto_resolve_container_name(struct ds_config *cfg) {
     count = count_running_containers(first_name, sizeof(first_name));
   }
 
-  if (count == 1) {
-    safe_strncpy(cfg->container_name, first_name, sizeof(cfg->container_name));
-    return 0;
-  }
-
+  /* If still not found after scan, fail */
   if (count == 0) {
     ds_error("No containers are currently running.");
-  } else {
+    return -1;
+  }
+
+  if (count > 1) {
     ds_error("Multiple containers running. Please specify " C_BOLD
              "--name" C_RESET ".");
     show_containers();
+    return -1;
   }
-  return -1;
+
+  safe_strncpy(cfg->container_name, first_name, sizeof(cfg->container_name));
+  return 0;
 }
 
 /**
@@ -178,17 +180,24 @@ static int resolve_and_load_config(struct ds_config *cfg) {
   if (auto_resolve_container_name(cfg) < 0)
     return -1;
 
-  if (ds_config_load_by_name(cfg->container_name, cfg) < 0) {
+  int config_err = ds_config_load_by_name(cfg->container_name, cfg);
+  pid_t pid = 0;
+  int is_running = is_container_running(cfg, &pid);
+
+  if (config_err < 0 || !is_running || pid <= 0) {
+    /* If still not found, search system as a last resort (recovery scan) */
     int prev_silent = ds_log_silent;
     ds_log_silent = 1;
     scan_containers();
     ds_log_silent = prev_silent;
 
-    if (ds_config_load_by_name(cfg->container_name, cfg) < 0) {
-      ds_error("Container '%s' not found or metadata missing.",
-               cfg->container_name);
-      return -1;
-    }
+    config_err = ds_config_load_by_name(cfg->container_name, cfg);
+  }
+
+  if (config_err < 0) {
+    ds_error("Container '%s' not found or metadata missing.",
+             cfg->container_name);
+    return -1;
   }
   return 0;
 }
