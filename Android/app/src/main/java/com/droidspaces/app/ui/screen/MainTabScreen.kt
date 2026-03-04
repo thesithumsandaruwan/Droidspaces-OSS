@@ -80,11 +80,11 @@ fun MainTabScreen(
     }
 
     // Track if we've already triggered initial load in this session
-    // This prevents re-triggering on navigation back from Settings
     var hasTriggeredInitialLoad by rememberSaveable { mutableStateOf(false) }
 
-    // Initial setup - only runs ONCE per app session (not on navigation back)
-    LaunchedEffect(skipInitialRefresh, hasTriggeredInitialLoad) {
+    // Initial setup - only runs ONCE per app session
+    // DO NOT use hasTriggeredInitialLoad as a key, because changing it cancels the effect!
+    LaunchedEffect(skipInitialRefresh) {
         if (!hasTriggeredInitialLoad) {
             hasTriggeredInitialLoad = true
 
@@ -99,19 +99,24 @@ fun MainTabScreen(
             // Proactive recovery on first launch: Always run scan if backend available
             if (appStateViewModel.isBackendAvailable) {
                 containerViewModel.runScan()
+            } else {
+                // If not available immediately, ensure we fetch when it does become available
+                containerViewModel.fetchContainerList()
             }
         }
     }
 
-    // Fetch containers when backend BECOMES available (state change only)
-    // This handles the case where backend check completes after initial load
-    val previousBackendAvailable = remember { mutableStateOf(appStateViewModel.isBackendAvailable) }
+    // Fetch containers when backend BECOMES available or evaluates to true
     LaunchedEffect(appStateViewModel.isBackendAvailable) {
-        // Only trigger if backend just BECAME available (was false, now true)
-        if (appStateViewModel.isBackendAvailable && !previousBackendAvailable.value) {
-            containerViewModel.fetchContainerList()
+        if (appStateViewModel.isBackendAvailable) {
+            // Because runScan might be running, fetchContainerList is safe because it only
+            // cancels previous fetch jobs, and runs concurrently (which is fine, UI populates fast).
+            // We only trigger this if it's currently empty, to avoid double-fetching if runScan succeeded,
+            // or just always run it since it's cheap and ensures sync.
+            if (containerViewModel.containerList.isEmpty()) {
+                containerViewModel.fetchContainerList()
+            }
         }
-        previousBackendAvailable.value = appStateViewModel.isBackendAvailable
     }
 
     // Map backend status to UI status - remember previous status to prevent glitches

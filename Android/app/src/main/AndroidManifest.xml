@@ -31,15 +31,6 @@
             </intent-filter>
         </activity>
 
-        <receiver
-            android:name=".receiver.BootReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
-
         <!-- This service handles automatic locale storage for Android 12 and below -->
         <service
             android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
