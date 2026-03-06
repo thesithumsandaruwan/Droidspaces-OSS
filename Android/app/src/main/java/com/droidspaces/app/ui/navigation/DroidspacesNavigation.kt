@@ -284,6 +284,7 @@ fun DroidspacesNavigation(
             )
 
             ContainerConfigScreen(
+                initialNetMode = viewModel.netMode,
                 initialEnableIPv6 = viewModel.enableIPv6,
                 initialEnableAndroidStorage = viewModel.enableAndroidStorage,
                 initialEnableHwAccess = viewModel.enableHwAccess,
@@ -293,8 +294,8 @@ fun DroidspacesNavigation(
                 initialDnsServers = viewModel.dnsServers,
                 initialRunAtBoot = viewModel.runAtBoot,
                 initialEnvFileContent = viewModel.envFileContent ?: "",
-                onNext = { enableIPv6, enableAndroidStorage, enableHwAccess, enableTermuxX11, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, envFileContent ->
-                    viewModel.setConfig(enableIPv6, enableAndroidStorage, enableHwAccess, enableTermuxX11, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, envFileContent)
+                onNext = { netMode, enableIPv6, enableAndroidStorage, enableHwAccess, enableTermuxX11, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, envFileContent ->
+                    viewModel.setConfig(netMode, enableIPv6, enableAndroidStorage, enableHwAccess, enableTermuxX11, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, envFileContent)
                     navController.navigate(Screen.SparseImageConfig.route)
                 },
                 onBack = {

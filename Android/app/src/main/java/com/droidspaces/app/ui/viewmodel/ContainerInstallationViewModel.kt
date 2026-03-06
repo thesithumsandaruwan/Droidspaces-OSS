@@ -22,6 +22,9 @@ class ContainerInstallationViewModel : ViewModel() {
     var hostname: String by mutableStateOf("")
         private set
 
+    var netMode: String by mutableStateOf("host")
+        private set
+
     var enableIPv6: Boolean by mutableStateOf(false)
         private set
 
@@ -73,6 +76,7 @@ class ContainerInstallationViewModel : ViewModel() {
     }
 
     fun setConfig(
+        netMode: String,
         enableIPv6: Boolean,
         enableAndroidStorage: Boolean,
         enableHwAccess: Boolean,
@@ -84,6 +88,7 @@ class ContainerInstallationViewModel : ViewModel() {
         runAtBoot: Boolean,
         envFileContent: String?
     ) {
+        this.netMode = netMode
         this.enableIPv6 = enableIPv6
         this.enableAndroidStorage = enableAndroidStorage
         this.enableHwAccess = enableHwAccess
@@ -108,6 +113,7 @@ class ContainerInstallationViewModel : ViewModel() {
             } else {
                 ContainerManager.getRootfsPath(containerName)
             },
+            netMode = netMode,
             enableIPv6 = enableIPv6,
             enableAndroidStorage = enableAndroidStorage,
             enableHwAccess = enableHwAccess,
@@ -128,6 +134,7 @@ class ContainerInstallationViewModel : ViewModel() {
         tarballUri = null
         containerName = ""
         hostname = ""
+        netMode = "host"
         enableIPv6 = false
         enableAndroidStorage = false
         enableHwAccess = false

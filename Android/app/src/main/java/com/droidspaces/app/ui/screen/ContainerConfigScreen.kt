@@ -25,6 +25,7 @@ import com.droidspaces.app.ui.component.EnvironmentVariablesDialog
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContainerConfigScreen(
+    initialNetMode: String = "host",
     initialEnableIPv6: Boolean = false,
     initialEnableAndroidStorage: Boolean = false,
     initialEnableHwAccess: Boolean = false,
@@ -36,6 +37,7 @@ fun ContainerConfigScreen(
     initialRunAtBoot: Boolean = false,
     initialEnvFileContent: String = "",
     onNext: (
+        netMode: String,
         enableIPv6: Boolean,
         enableAndroidStorage: Boolean,
         enableHwAccess: Boolean,
@@ -49,6 +51,7 @@ fun ContainerConfigScreen(
     ) -> Unit,
     onBack: () -> Unit
 ) {
+    var netMode by remember { mutableStateOf(initialNetMode) }
     var enableIPv6 by remember { mutableStateOf(initialEnableIPv6) }
     var enableAndroidStorage by remember { mutableStateOf(initialEnableAndroidStorage) }
     var enableHwAccess by remember { mutableStateOf(initialEnableHwAccess) }
@@ -143,7 +146,7 @@ fun ContainerConfigScreen(
             ) {
                 Button(
                     onClick = {
-                        onNext(enableIPv6, enableAndroidStorage, enableHwAccess, if (enableHwAccess) true else enableTermuxX11, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, if (envFileContent.isBlank()) null else envFileContent)
+                        onNext(netMode, enableIPv6, enableAndroidStorage, enableHwAccess, if (enableHwAccess) true else enableTermuxX11, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, if (envFileContent.isBlank()) null else envFileContent)
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -171,6 +174,53 @@ fun ContainerConfigScreen(
             )
 
             Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = context.getString(R.string.cat_networking),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+
+            var expanded by remember { mutableStateOf(false) }
+            val modes = listOf("host", "nat", "none")
+            val modeNames = mapOf(
+                "host" to context.getString(R.string.network_mode_host),
+                "nat" to context.getString(R.string.network_mode_nat),
+                "none" to context.getString(R.string.network_mode_none)
+            )
+
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = !expanded }
+            ) {
+                OutlinedTextField(
+                    value = modeNames[netMode] ?: netMode,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text(context.getString(R.string.network_mode)) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    leadingIcon = { Icon(Icons.Default.Public, contentDescription = null) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    modes.forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(modeNames[mode] ?: mode) },
+                            onClick = {
+                                netMode = mode
+                                if (mode != "host") {
+                                    enableIPv6 = false
+                                }
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
 
             // DNS Servers input
             val isDnsError = remember(dnsServers) {
@@ -200,7 +250,15 @@ fun ContainerConfigScreen(
                 title = context.getString(R.string.enable_ipv6),
                 description = context.getString(R.string.enable_ipv6_description),
                 checked = enableIPv6,
-                onCheckedChange = { enableIPv6 = it }
+                onCheckedChange = { enableIPv6 = it },
+                enabled = netMode == "host"
+            )
+
+            Text(
+                text = context.getString(R.string.cat_integration),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 16.dp)
             )
 
             ToggleCard(
@@ -228,6 +286,13 @@ fun ContainerConfigScreen(
                 enabled = !enableHwAccess
             )
 
+            Text(
+                text = context.getString(R.string.cat_security),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 16.dp)
+            )
+
             ToggleCard(
                 icon = Icons.Default.Security,
                 title = context.getString(R.string.selinux_permissive),
@@ -250,6 +315,13 @@ fun ContainerConfigScreen(
                 description = context.getString(R.string.run_at_boot_description),
                 checked = runAtBoot,
                 onCheckedChange = { runAtBoot = it }
+            )
+
+            Text(
+                text = context.getString(R.string.cat_advanced),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 16.dp)
             )
 
             // Environment Variables Row

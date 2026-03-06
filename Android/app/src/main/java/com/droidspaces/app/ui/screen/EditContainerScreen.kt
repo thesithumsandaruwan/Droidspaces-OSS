@@ -54,6 +54,7 @@ fun EditContainerScreen(
 
     // State for editable fields
     var hostname by remember { mutableStateOf(container.hostname) }
+    var netMode by remember { mutableStateOf(container.netMode) }
     var enableIPv6 by remember { mutableStateOf(container.enableIPv6) }
     var enableAndroidStorage by remember { mutableStateOf(container.enableAndroidStorage) }
     var enableHwAccess by remember { mutableStateOf(container.enableHwAccess) }
@@ -67,6 +68,7 @@ fun EditContainerScreen(
 
     // Track the "saved" baseline values - updated after each successful save
     var savedHostname by remember { mutableStateOf(container.hostname) }
+    var savedNetMode by remember { mutableStateOf(container.netMode) }
     var savedEnableIPv6 by remember { mutableStateOf(container.enableIPv6) }
     var savedEnableAndroidStorage by remember { mutableStateOf(container.enableAndroidStorage) }
     var savedEnableHwAccess by remember { mutableStateOf(container.enableHwAccess) }
@@ -92,6 +94,7 @@ fun EditContainerScreen(
     val hasChanges by remember {
         derivedStateOf {
             hostname != savedHostname ||
+            netMode != savedNetMode ||
             enableIPv6 != savedEnableIPv6 ||
             enableAndroidStorage != savedEnableAndroidStorage ||
             enableHwAccess != savedEnableHwAccess ||
@@ -122,6 +125,7 @@ fun EditContainerScreen(
                 // Create updated ContainerInfo with new values
                 val updatedConfig = container.copy(
                     hostname = hostname,
+                    netMode = netMode,
                     enableIPv6 = enableIPv6,
                     enableAndroidStorage = enableAndroidStorage,
                     enableHwAccess = enableHwAccess,
@@ -143,6 +147,7 @@ fun EditContainerScreen(
                     onSuccess = {
                         // Success - update saved baseline values to current values
                         savedHostname = hostname
+                        savedNetMode = netMode
                         savedEnableIPv6 = enableIPv6
                         savedEnableAndroidStorage = enableAndroidStorage
                         savedEnableHwAccess = enableHwAccess
@@ -378,6 +383,54 @@ fun EditContainerScreen(
                 }
             )
 
+            Text(
+                text = context.getString(R.string.cat_networking),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+
+            var expanded by remember { mutableStateOf(false) }
+            val modes = listOf("host", "nat", "none")
+            val modeNames = mapOf(
+                "host" to context.getString(R.string.network_mode_host),
+                "nat" to context.getString(R.string.network_mode_nat),
+                "none" to context.getString(R.string.network_mode_none)
+            )
+
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = !expanded }
+            ) {
+                OutlinedTextField(
+                    value = modeNames[netMode] ?: netMode,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text(context.getString(R.string.network_mode)) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    leadingIcon = { Icon(Icons.Default.Public, contentDescription = null) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    modes.forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(modeNames[mode] ?: mode) },
+                            onClick = {
+                                clearFocus()
+                                netMode = mode
+                                if (mode != "host") {
+                                    enableIPv6 = false
+                                }
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
             // DNS Servers input
             val isDnsError = remember(dnsServers) {
                 dnsServers.isNotEmpty() && !dnsServers.all { it.isDigit() || it == '.' || it == ':' || it == ',' }
@@ -401,7 +454,6 @@ fun EditContainerScreen(
                 }
             )
 
-            // Configuration toggles
             ToggleCard(
                 icon = Icons.Default.NetworkCheck,
                 title = context.getString(R.string.enable_ipv6),
@@ -410,7 +462,15 @@ fun EditContainerScreen(
                 onCheckedChange = {
                     clearFocus()
                     enableIPv6 = it
-                }
+                },
+                enabled = netMode == "host"
+            )
+
+            Text(
+                text = context.getString(R.string.cat_integration),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 16.dp)
             )
 
             ToggleCard(
@@ -447,6 +507,13 @@ fun EditContainerScreen(
                 enabled = !enableHwAccess
             )
 
+            Text(
+                text = context.getString(R.string.cat_security),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 16.dp)
+            )
+
             ToggleCard(
                 icon = Icons.Default.Security,
                 title = context.getString(R.string.selinux_permissive),
@@ -478,6 +545,13 @@ fun EditContainerScreen(
                     clearFocus()
                     runAtBoot = it
                 }
+            )
+
+            Text(
+                text = context.getString(R.string.cat_advanced),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 16.dp)
             )
 
             // Environment Variables Row

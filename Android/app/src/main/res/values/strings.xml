@@ -163,6 +163,16 @@
     <string name="selinux_permissive_description">Set SELinux permissive</string>
     <string name="run_at_boot">Run at Boot</string>
     <string name="run_at_boot_description">Start container on boot</string>
+    
+    <!-- Config Categories and Network Mode -->
+    <string name="cat_networking">Networking</string>
+    <string name="cat_integration">Integration &amp; Hardware</string>
+    <string name="cat_security">Security &amp; Boot</string>
+    <string name="cat_advanced">Advanced Options</string>
+    <string name="network_mode">Network Mode</string>
+    <string name="network_mode_host">Host (Default)</string>
+    <string name="network_mode_nat">NAT (Isolated)</string>
+    <string name="network_mode_none">None (Air-gapped)</string>
     <string name="saved">Saved</string>
     <string name="saving">Saving...</string>
     <string name="save_changes">Save Changes</string>
