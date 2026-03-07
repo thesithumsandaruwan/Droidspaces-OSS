@@ -443,9 +443,38 @@ int internal_boot(struct ds_config *cfg) {
   }
 
   /* 25. EXEC INIT */
-  char *argv[] = {"/sbin/init", NULL};
+  char *init_args[16];
+  int argc = 0;
+  init_args[argc++] = (char *)"/sbin/init";
 
-  if (execve("/sbin/init", argv, environ) < 0) {
+  /* Tell systemd which cgroup hierarchy the container was actually set up
+   * with.  We use statfs() on /sys/fs/cgroup (now the container root after
+   * pivot_root) rather than guessing from kernel version.  setup_cgroups()
+   * already decided the layout — we just reflect what it mounted:
+   *   cgroup2fs  → unified (v2 only)  → unified_cgroup_hierarchy=1
+   *   tmpfs      → legacy / hybrid    → unified_cgroup_hierarchy=0
+   * This is exactly what LXC does via lxc.init.cmd. */
+#ifndef CGROUP2_SUPER_MAGIC
+#define CGROUP2_SUPER_MAGIC 0x63677270
+#endif
+  if (is_systemd) {
+    struct statfs _cgsfs;
+    if (statfs("/sys/fs/cgroup", &_cgsfs) == 0) {
+      if ((unsigned long)_cgsfs.f_type == (unsigned long)CGROUP2_SUPER_MAGIC) {
+        init_args[argc++] = (char *)"systemd.unified_cgroup_hierarchy=1";
+      } else {
+        /* tmpfs root → legacy or hybrid layout mounted by setup_cgroups */
+        init_args[argc++] = (char *)"systemd.unified_cgroup_hierarchy=0";
+        init_args[argc++] =
+            (char *)"systemd.legacy_systemd_cgroup_controller=1";
+      }
+    }
+    /* statfs failure → leave systemd to probe on its own */
+  }
+
+  init_args[argc] = NULL;
+
+  if (execve("/sbin/init", init_args, environ) < 0) {
     ds_error("Failed to execute /sbin/init: %s", strerror(errno));
     ds_die("Container boot failed. Please ensure the rootfs path is correct "
            "and contains a valid /sbin/init binary.");

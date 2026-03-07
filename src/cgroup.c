@@ -206,6 +206,32 @@ static int is_cgroup_ns_active(void) {
  * 2. If Cgroup Namespace is active (Linux 4.6+), mount hierarchies directly.
  * 3. Otherwise (Legacy), bind-mount the container's subset from the host.
  */
+#ifndef CGROUP2_SUPER_MAGIC
+#define CGROUP2_SUPER_MAGIC 0x63677270
+#endif
+
+/* Returns 1 if the kernel's cgroupv2 controllers are sufficiently complete
+ * for systemd. The cpu/io/memory v2 controllers only became usable in 5.2.
+ * On kernels like Android 4.14, cgroup2 mounts SUCCEED but the controllers
+ * are absent — systemd probes them and falls apart. */
+static int cgroupv2_usable(void) {
+  int major = 0, minor = 0;
+  if (get_kernel_version(&major, &minor) != 0)
+    return 0; /* unknown kernel — assume unusable, safe default */
+  return (major > 5 || (major == 5 && minor >= 2));
+}
+
+/* Returns 1 if the HOST's /sys/fs/cgroup is a pure cgroupv2 root.
+ * At setup_cgroups() time CWD is the container rootfs but /sys/fs/cgroup
+ * (absolute path) still refers to the HOST mount — we haven't pivot_root'd.
+ * This is exactly how LXC detects the host layout. */
+static int host_is_cgroupv2_root(void) {
+  struct statfs sfs;
+  if (statfs("/sys/fs/cgroup", &sfs) != 0)
+    return 0;
+  return (unsigned long)sfs.f_type == (unsigned long)CGROUP2_SUPER_MAGIC;
+}
+
 int setup_cgroups(int is_systemd) {
   if (access("sys/fs/cgroup", F_OK) != 0) {
     if (mkdir_p("sys/fs/cgroup", 0755) < 0)
@@ -221,16 +247,27 @@ int setup_cgroups(int is_systemd) {
   int n = get_host_cgroups(hosts, 32);
 
   int in_ns = is_cgroup_ns_active();
-  int is_pure_v2 = 0;
+  /* Determine host layout and kernel capability ONCE before the loop.
+   * v2_ok: kernel has complete cgroupv2 controllers (>= 5.2).
+   * is_pure_v2: host root IS cgroup2 AND kernel can use it.
+   * If v2_ok is false we skip all cgroup2 entries — mounting them would
+   * succeed on 4.14+ but leave systemd with broken/empty controllers. */
+  int v2_ok = cgroupv2_usable();
+  int is_pure_v2 = host_is_cgroupv2_root() && v2_ok;
   int systemd_setup_done = 0;
 
   for (int i = 0; i < n; i++) {
+    /* Skip cgroup2 entries on kernels where v2 controllers are incomplete.
+     * This prevents systemd from seeing a half-baked cgroup2 and trying to
+     * use it (which is the root cause of the "messed up hierarchy" on 4.14). */
+    if (hosts[i].version == 2 && !v2_ok)
+      continue;
+
     char container_mp[PATH_MAX];
     const char *suffix = NULL;
 
     if (strcmp(hosts[i].mountpoint, "/sys/fs/cgroup") == 0) {
       suffix = "";
-      is_pure_v2 = (hosts[i].version == 2);
     } else {
       suffix = strstr(hosts[i].mountpoint, "/sys/fs/cgroup/");
       if (suffix) {
@@ -357,10 +394,19 @@ int setup_cgroups(int is_systemd) {
   }
 
   /* Final isolation: Remount /sys/fs/cgroup as Read-Only.
-   * CRITICAL: Skip if it's a pure v2 hierarchy, as systemd needs write access
-   * to create scopes at the root. On v1/hybrid, the base is tmpfs and safe to
-   * RO. */
-  if (!is_pure_v2) {
+   *
+   * Pure v2: NEVER remount RO — systemd needs write access to create scopes
+   * at the unified root.
+   *
+   * Modern v1/hybrid (kernel >= 5.2, cgroupns active): remount the base tmpfs
+   * RO. Sub-mounts remain RW inside the cgroupns. The RO base signals to
+   * systemd 258+ that it is running inside a container.
+   *
+   * Legacy v1 (kernel < 5.2, no cgroupns): NEVER remount RO. Systemd needs
+   * the base tmpfs RW to create controller alias symlinks for Android-renamed
+   * hierarchies (e.g. cpu->cpuctl, cpuacct->acct). The v2_ok gate matches
+   * the same threshold used in container.c. */
+  if (!is_pure_v2 && v2_ok) {
     mount(NULL, "sys/fs/cgroup", NULL,
           MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL);
   }
