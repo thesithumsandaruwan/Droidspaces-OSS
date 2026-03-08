@@ -332,8 +332,7 @@ int start_rootfs(struct ds_config *cfg) {
   /* 2. Mount rootfs image if provided (using the resolved name) */
   if (cfg->rootfs_img_path[0] && !lock_acquired) {
     if (mount_rootfs_img(cfg->rootfs_img_path, cfg->rootfs_path,
-                         sizeof(cfg->rootfs_path), cfg->volatile_mode,
-                         cfg->container_name) < 0) {
+                         sizeof(cfg->rootfs_path), cfg->container_name) < 0) {
       goto cleanup;
     }
     cfg->is_img_mount = 1;

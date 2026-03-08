@@ -385,7 +385,7 @@ int cleanup_volatile_overlay(struct ds_config *cfg);
 int check_volatile_mode(struct ds_config *cfg);
 int setup_custom_binds(struct ds_config *cfg, const char *rootfs);
 int mount_rootfs_img(const char *img_path, char *mount_point, size_t mp_size,
-                     int readonly, const char *name);
+                     const char *name);
 int unmount_rootfs_img(const char *mount_point, int silent);
 int get_container_mount_fstype(pid_t pid, const char *path, char *fstype,
                                size_t size);

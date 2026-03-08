@@ -646,7 +646,7 @@ int setup_custom_binds(struct ds_config *cfg, const char *rootfs) {
  * ---------------------------------------------------------------------------*/
 
 int mount_rootfs_img(const char *img_path, char *mount_point, size_t mp_size,
-                     int readonly, const char *name) {
+                     const char *name) {
   if (find_available_mountpoint(name, mount_point, mp_size) < 0) {
     ds_error("Failed to find available mount point for %s", name);
     return -1;
@@ -674,10 +674,13 @@ int mount_rootfs_img(const char *img_path, char *mount_point, size_t mp_size,
     run_command_quiet(chcon_argv);
   }
 
-  /* Mount via loop device with retries (Critical for Kernel 4.14 stability) */
-  char *opts = readonly ? "loop,ro,noatime,nodiratime,init_itable=0"
-                        : "loop,nodelalloc,noatime,nodiratime,errors=remount-"
-                          "ro,init_itable=0";
+  /* Mount via loop device with retries (Critical for Kernel 4.14 stability).
+   * Note: In volatile mode, OverlayFS handles the discarding of changes,
+   * so we can safely mount the underlying image as Read-Write to ensure
+   * a seamless transition even if the container is restarted without volatile
+   * mode later (pivot_root needs a writable mount to create .old_root). */
+  char *opts = "loop,nodelalloc,noatime,nodiratime,errors=remount-ro,"
+               "init_itable=0";
   char *mount_argv[] = {"mount",     "-o", opts, (char *)(uintptr_t)img_path,
                         mount_point, NULL};
 
