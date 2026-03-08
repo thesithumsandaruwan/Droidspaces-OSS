@@ -448,7 +448,7 @@ int ds_cgroup_attach(pid_t target_pid) {
         ctrl = first_ctrl;
     }
 
-    /* 1. Discover where target_pid is for this hierarchy */
+    /* 1. Discover where target_pid lives in this hierarchy */
     char proc_path[PATH_MAX];
     snprintf(proc_path, sizeof(proc_path), "/proc/%d/cgroup", target_pid);
 
@@ -482,6 +482,19 @@ int ds_cgroup_attach(pid_t target_pid) {
         if (nl)
           *nl = '\0';
         safe_strncpy(subpath, path, sizeof(subpath));
+
+        /* Professional refinement: if the path ends in a systemd management
+         * unit (.scope, .service, .slice), strip that component. This ensures
+         * the 'ds-enter-PID' cgroup is created as a peer to 'init.scope'
+         * (the container root) rather than being nested inside it. This is
+         * cleaner for systemd's accounting and avoids "non-leaf" V2 errors. */
+        char *last_slash = strrchr(subpath, '/');
+        if (last_slash && last_slash != subpath) {
+          if (strstr(last_slash, ".scope") || strstr(last_slash, ".service") ||
+              strstr(last_slash, ".slice")) {
+            *last_slash = '\0';
+          }
+        }
         break;
       }
     }
@@ -490,28 +503,48 @@ int ds_cgroup_attach(pid_t target_pid) {
     if (subpath[0] == '\0')
       continue;
 
-    /* 2. Move self (or caller) into that cgroup on the host */
-    char tasks_path[PATH_MAX];
-    safe_strncpy(tasks_path, hosts[i].mountpoint, sizeof(tasks_path));
-    strncat(tasks_path, "/", sizeof(tasks_path) - strlen(tasks_path) - 1);
-    strncat(tasks_path, subpath, sizeof(tasks_path) - strlen(tasks_path) - 1);
-    strncat(tasks_path, (hosts[i].version == 2) ? "/cgroup.procs" : "/tasks",
-            sizeof(tasks_path) - strlen(tasks_path) - 1);
+    /* 2. Create a fresh leaf cgroup under init's path.
+     *
+     * Writing directly to init's cgroup.procs fails with EPERM on cgroupv1
+     * legacy kernels (and for systemd-managed scopes on v2): the cgroup is
+     * either non-leaf or systemd holds a delegation lock on it.  The correct
+     * approach — which is exactly what lxc-attach uses — is to mkdir a new
+     * child cgroup under the target's subtree and write into THAT.  We own
+     * the new directory so the write always succeeds, and the process appears
+     * in the hierarchy as a proper descendant of init's cgroup rather than
+     * leaking to the cgroup root ("/"). */
+    /* Build: <mountpoint>/<subpath>/ds-enter-<pid>
+     * subpath always starts with '/' so we skip the extra separator.
+     * Use strncat chains — snprintf of two PATH_MAX strings into one
+     * PATH_MAX buffer triggers -Wformat-truncation=2 at compile time. */
+    char leaf_dir[PATH_MAX];
+    char enter_suffix[32];
+    safe_strncpy(leaf_dir, hosts[i].mountpoint, sizeof(leaf_dir));
+    /* subpath begins with '/', append directly — no extra '/' needed. */
+    strncat(leaf_dir, subpath, sizeof(leaf_dir) - strlen(leaf_dir) - 1);
+    snprintf(enter_suffix, sizeof(enter_suffix), "/ds-enter-%d", (int)getpid());
+    strncat(leaf_dir, enter_suffix, sizeof(leaf_dir) - strlen(leaf_dir) - 1);
 
-    int fd = open(tasks_path, O_WRONLY | O_CLOEXEC);
-    if (fd >= 0) {
-      char pid_s[32];
-      int len = snprintf(pid_s, sizeof(pid_s), "%d", getpid());
-      if (write(fd, pid_s, len) < 0) {
-        /* Ignore EPERM if we're already there or restricted,
-         * but log other errors. */
-        if (errno != EPERM) {
-          ds_warn("Failed to attach to cgroup %s: %s", tasks_path,
-                  strerror(errno));
-        }
-      }
-      close(fd);
+    if (mkdir(leaf_dir, 0755) < 0 && errno != EEXIST) {
+      continue;
     }
+
+    /* 3. Move self into the leaf via cgroup.procs (moves whole process,
+     *    not just the calling thread — unlike the legacy /tasks interface). */
+    char procs_path[PATH_MAX];
+    safe_strncpy(procs_path, leaf_dir, sizeof(procs_path));
+    strncat(procs_path, "/cgroup.procs",
+            sizeof(procs_path) - strlen(procs_path) - 1);
+
+    int fd = open(procs_path, O_WRONLY | O_CLOEXEC);
+    if (fd < 0) {
+      continue;
+    }
+
+    char pid_s[32];
+    int len = snprintf(pid_s, sizeof(pid_s), "%d", (int)getpid());
+    write(fd, pid_s, len);
+    close(fd);
   }
 
   return 0;

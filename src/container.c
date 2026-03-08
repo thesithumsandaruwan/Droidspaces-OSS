@@ -1245,7 +1245,9 @@ int enter_rootfs(struct ds_config *cfg, const char *user) {
      * subtree, which is required for D-Bus/logind inside to move it into
      * session scopes.
      */
+    ds_log_silent = 1;
     ds_cgroup_attach(pid);
+    ds_log_silent = 0;
 
     if (enter_namespace(pid, cfg) < 0)
       _exit(EXIT_FAILURE);
@@ -1386,6 +1388,13 @@ int run_in_rootfs(struct ds_config *cfg, int argc, char **argv) {
   }
 
   if (child == 0) {
+    /* Mirror enter_rootfs: attach to the container's cgroup subtree before
+     * crossing into its namespaces, so the command is properly accounted
+     * under systemd's hierarchy instead of leaking to the cgroup root. */
+    ds_log_silent = 1;
+    ds_cgroup_attach(pid);
+    ds_log_silent = 0;
+
     if (enter_namespace(pid, cfg) < 0)
       _exit(EXIT_FAILURE);
 
