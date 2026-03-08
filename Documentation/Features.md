@@ -18,9 +18,11 @@ Linux namespaces are a kernel feature that partitions system resources so that e
 | **IPC** | `CLONE_NEWIPC` | System V IPC and POSIX message queues. Prevents cross-container IPC leaks. |
 | **Cgroup** | `CLONE_NEWCGROUP` | Cgroup root directory. Each container sees its own cgroup hierarchy. |
 
-### Why Not Network Namespace?
+### Why Not Network Namespace? (Legacy Default)
 
-Droidspaces deliberately does **not** use a network namespace (`CLONE_NEWNET`). The container shares the host's network stack. This is a design choice that greatly simplifies setup: containers get internet access immediately without virtual bridges, NAT, or firewall rules. On Android, where networking is already complex (cellular, Wi-Fi, VPN), avoiding network namespaces prevents a whole category of connectivity issues.
+By default (`--net=host`), Droidspaces deliberately does **not** use a network namespace (`CLONE_NEWNET`). The container shares the host's network stack. This is a design choice that greatly simplifies setup: containers get internet access immediately without virtual bridges, NAT, or firewall rules. On Android, where networking is already complex (cellular, Wi-Fi, VPN), avoiding network namespaces prevents a whole category of connectivity issues.
+
+However, for users requiring **Pure Network Isolation**, Droidspaces now supports NAT and None modes which utilize `CLONE_NEWNET` to provide a completely private network stack.
 
 ### Why Not User Namespace?
 
@@ -233,6 +235,41 @@ If a host source path doesn't exist or a mount fails, Droidspaces issues a warni
 Droidspaces validates bind mount targets with two protections:
 1. **Pre-mount:** Uses `lstat()` to ensure the target inside the rootfs is not a symlink
 2. **Post-mount:** Uses `realpath()` via the `is_subpath()` helper to verify the mounted path cannot escape the container root
+
+---
+
+## Network Isolation (3 Modes)
+
+Droidspaces provides three distinct networking modes to balance ease-of-use with advanced isolation.
+
+### 1. Host Mode (`--net=host`) - Default
+The container shares the host's network namespace.
+- **Pros**: Zero configuration, instant internet access, works with all Android VPNs/hotspots.
+- **Cons**: No port isolation; services inside the container bind to host ports directly.
+
+### 2. NAT Mode (`--net=nat`)
+The container is placed in a private network namespace (`CLONE_NEWNET`) and connected to the host via a virtual bridge (`ds-br0`) or a direct veth pair.
+- **Deterministic IP**: Each container is assigned a unique IP in the `172.28.0.0/16` range, derived from its PID.
+- **Embedded DHCP**: Droidspaces includes a minimal, built-in DHCP server to automatically configure the container's `eth0`.
+- **Pure Isolation**: The container cannot see or interact with the host's network interfaces directly.
+- **Mandatory Upstream**: You **must** specify which host interfaces provide internet access via `--upstream` (e.g., `--upstream wlan0,rmnet0`).
+
+### 3. None Mode (`--net=none`)
+The container gets a private network namespace with only the loopback (`lo`) interface enabled.
+- **Use Case**: Maximum security for offline tasks.
+
+### Port Forwarding (NAT Mode)
+In NAT mode, you can expose container services to the host or local network using the `--port` flag:
+```bash
+# Forward host port 8080 to container port 80
+--port 8080:80
+
+# Forward with explicit protocol
+--port 2222:22/tcp --port 5000:5000/udp
+```
+
+### Upstream Interface Monitoring
+On Android, the connection often hops between Wi-Fi and Mobile Data. Droidspaces includes a **Route Monitor** that tracks your declared `--upstream` interfaces. If your active interface changes (e.g., you walk out of Wi-Fi range), the monitor automatically updates the kernel's policy routing to keep the container connected without a restart.
 
 ---
 

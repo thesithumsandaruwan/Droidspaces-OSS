@@ -21,6 +21,26 @@ This tab lists all your installed environments. Each container has a control car
 
 ---
 
+## Networking Configuration
+
+When editing or creating a container, you can choose from three networking modes:
+
+- **Host (Default)**: Shares host network directly.
+- **NAT (Isolated)**: Private network namespace with deterministic IP and port forwarding support.
+- **None**: No network access (loopback only).
+
+### Configuring Upstream Interfaces (NAT Mode)
+If you select **NAT (Isolated)** mode, you **must** specify one or more upstream interfaces for the container to have internet access. The app provides a convenient auto-detection workflow:
+
+1. **Detect Wi-Fi**: Connect to your Wi-Fi network and press the refresh button in the "Upstream Interfaces" menu. Select the interface (usually `wlan0`) that appears.
+2. **Detect Mobile Data**: Disable Wi-Fi and connect to mobile data. Press the refresh button again and select the mobile data interface (e.g., `rmnet0`, `ccmni1`).
+3. **Save**: Both interfaces will now be used by the Route Monitor to keep your container connected as you switch networks.
+
+### Port Forwarding
+In NAT mode, use the **Port Forwarding** section to map host ports to container ports (e.g., `22:22`).
+
+---
+
 ## Panel Tab (Active Environments)
 
 The **Panel** tab focuses strictly on your running containers. Tapping a running container card opens the **Details Screen**.

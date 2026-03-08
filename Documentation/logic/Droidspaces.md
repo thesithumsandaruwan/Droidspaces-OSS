@@ -6,9 +6,9 @@
 
 Droidspaces is a lightweight, zero-virtualization container runtime designed to run full Linux distributions (Ubuntu, Alpine, etc.) with systemd or openrc as PID 1, natively on Android devices. It achieves process isolation through Linux PID, IPC, MNT, and UTS namespaces — the same kernel primitives used by Docker and LXC — but targets the constrained and idiosyncratic Android kernel environment where many standard container tools refuse to operate.
 
-This document is a complete internal architecture reference for **Droidspaces v4.3.2**. Every struct, every syscall, every mount, and every design decision is documented here with the intent that a future implementer could rewrite this project from scratch without ever reading the original source. Where the implementation is elegant, I say so. Where it is broken or fragile, I say so with equal honesty.
+This document is a complete internal architecture reference for **Droidspaces v5.3.1**. Every struct, every syscall, every mount, and every design decision is documented here with the intent that a future implementer could rewrite this project from scratch without ever reading the original source. Where the implementation is elegant, I say so. Where it is broken or fragile, I say so with equal honesty.
 
-The codebase is approximately **3,300 lines of C** across 12 `.c` files and 1 master header, compiled as a single static binary against musl libc.
+The codebase is approximately **12,800 lines of C** across 20 `.c` files and 1 master header, compiled as a single static binary against musl libc.
 
 
 ---
@@ -24,12 +24,12 @@ Droidspaces takes a Linux rootfs directory (or ext4 image) and boots it inside a
 - Its own hostname (UTS namespace)
 - Its own IPC resources (semaphores, shared memory)
 - Its own Cgroup view (Cgroup namespace / Sub-cgroup isolation)
-- Full networking via the host kernel's network stack (no NET namespace)
+- **Three networking modes**: host (shared stack), NAT (full isolation with internet access via veth/bridge/iptables), and none (air-gapped loopback only)
 
 ### 1.2 What It Does NOT Do
 
 - **No user namespace.** The container runs as root from the host kernel's perspective. This is deliberate — Android kernels often lack user namespace support, and Droidspaces requires root anyway.
-- **No network namespace.** The container shares the host's network stack. This simplifies setup enormously but means no per-container firewall rules via network namespaces.
+- **Network namespace is optional.** `--net=host` shares the host stack (default, zero setup cost). `--net=nat` and `--net=none` unshare `CLONE_NEWNET`, giving the container a fully private network stack. See Section 12 for the complete NAT implementation.
 - **Limited resource constraints.** Droidspaces implements full cgroup isolation via namespaces and subtree binding (see Section 11), providing a clean root for `systemd`. However, it does not set hard resource limits (CPU/Mem quotas) by default.
 
 ### 1.3 Source Structure
@@ -38,18 +38,25 @@ Droidspaces takes a Linux rootfs directory (or ext4 image) and boots it inside a
 src/
 ├── droidspace.h        Master header — all structs, constants, prototypes
 ├── main.c              CLI parsing, command dispatch
+├── config.c            Configuration loading, saving, and validation (ds_config)
 ├── container.c         start/stop/enter/run/info/show/restart commands
 ├── boot.c              internal_boot() — the PID 1 boot sequence
 ├── mount.c             Mount helpers, /dev setup, rootfs.img handling
+├── cgroup.c            LXC-style Cgroup setup (v1, v2, hybrid, ns-aware)
 ├── console.c           epoll-based console I/O monitor loop
 ├── terminal.c          PTY allocation, /dev/console + /dev/ttyN setup
-├── network.c           DNS, routing, hostname, IPv6 configuration
+├── network.c           DNS, host/rootfs networking, veth, route monitor
+├── ds_netlink.c        Pure-C RTNETLINK API (link/addr/route/rule ops)
+├── ds_iptables.c       Raw socket iptables management (MASQUERADE, DNAT, FORWARD)
+├── ds_dhcp.c           Embedded single-lease DHCP server (joinable thread)
 ├── hardware.c          GPU group auto-detection, X11 socket mounting
 ├── android.c           Android-specific: SELinux, optimizations, storage
+├── android_seccomp.c   Android system call filtering (Seccomp) per-container
 ├── environment.c       Environment variables, os-release parsing
 ├── utils.c             File I/O, UUID generation, firmware path mgmt
 ├── pid.c               PID file management, workspace, container naming
-└── check.c             System requirements checker
+├── check.c             System requirements checker
+└── documentation.c     Interactive Pager-based Help System (docs command)
 
 ```
 
@@ -156,7 +163,8 @@ Here's the high-level flow from `start` to `stop`, distilled to its essence:
                 │                    ▼                   │
                 │               setsid()                 │
                 │          migrate to sub-cgroup         │
-                │     unshare(PID|UTS|IPC|CGROUP)        │
+                │  unshare(PID|UTS|IPC|CGROUP)           │
+                │  [+ CLONE_NEWNET if nat/none]           │
                 │                    │                   │
                 │               fork()│                   │
                 │         ┌──────────┼──────────┐        │
@@ -296,7 +304,7 @@ Most Android devices use f2fs for `/data`. OverlayFS on many Android kernels (4.
 Droidspaces detects this at runtime via `statfs()` magic `0xF2F52010` and prints a clear diagnostic. **Workaround**: Use a rootfs image (`-i`) instead — the ext4 loop mount provides a compatible lowerdir.
 
 **What is NOT used and why:**
-- `CLONE_NEWNET` — The container shares the host network. Deliberate design choice for simplicity on Android.
+- `CLONE_NEWNET` for `--net=host` — the container deliberately shares the host network stack in this mode for zero-setup simplicity. For `--net=nat` and `--net=none`, `CLONE_NEWNET` IS unshared. See Section 12.
 - `CLONE_NEWUSER` — Not used because Android kernels often lack support, and the tool requires root anyway.
 
 ### 4.4 The internal_boot() Sequence
@@ -944,7 +952,186 @@ This "Shield" acts as a compatibility layer that makes legacy hardware feel like
 
 ---
 
-## 12. Status Reporting
+## 12. Network Isolation — NAT Mode
+
+This section documents the most complex subsystem in Droidspaces: full network isolation with internet access on Android. It took longer to get right than everything else combined.
+
+### 12.1 Why Docker and LXC Fail on Android
+
+Before explaining what Droidspaces does, it's worth understanding why every other container runtime fails at the network layer on Android — even when `lxc-checkconfig` or `docker info` shows all kernel features as "enabled".
+
+**`CONFIG_ANDROID_PARANOID_NETWORK`** is the primary killer. Even with every netfilter config compiled in, Android restricts socket creation to processes in specific GID groups (`inet`, `net_raw`, `net_admin`). Docker and LXC daemons run as root but outside those GIDs — `socket(AF_INET, ...)` silently fails with `EPERM`. The daemon tries to create `docker0` or `virbr0`, the kernel denies it, and the daemon gives up. `lxc-checkconfig` only reads `/proc/config.gz` — it has zero awareness of this GID restriction.
+
+**Android SELinux policy** denies `create` on `tun_socket`, `netlink_route_socket`, and `rawip_socket` for anything that isn't a labeled Android service. The Docker daemon gets no label — every netlink operation is blocked before it reaches the kernel's netfilter code.
+
+**`/proc/sys/net` lockdown** — Android init writes-protects several sysctl knobs early in boot. `ip_forward` and `conf/all/forwarding` — Docker tries to enable these and silently fails.
+
+**No `netd` cooperation** — On stock Android, all network interface creation goes through `netd` (the network daemon). Creating `docker0` bypasses `netd` entirely; Android's routing rules then ignore those interfaces because they were never registered with `netd`'s routing table management.
+
+Droidspaces sidesteps all of this by:
+1. Requiring a custom kernel with `CONFIG_ANDROID_PARANOID_NETWORK=n`
+2. Running under SELinux permissive mode (user-controlled)
+3. Using pure RTNETLINK and raw socket iptables — no external binaries, no `netd`
+4. Implementing its own DHCP server and route monitor
+
+### 12.2 The Three Network Modes
+
+| Mode | `CLONE_NEWNET` | Internet | Use Case |
+|---|---|---|---|
+| `--net=host` (default) | No | Yes (shared) | Simplicity, no isolation needed |
+| `--net=nat` | Yes | Yes (via NAT) | Isolation with internet access |
+| `--net=none` | Yes | No | Air-gapped, security-critical |
+
+For `nat` and `none`, `CLONE_NEWNET` is added to the `unshare()` call in the intermediate process. The container gets a completely private network stack — no host interfaces are visible inside.
+
+### 12.3 The Three-Pipe Handshake
+
+Creating the veth pair requires a precise coordination sequence between the monitor and the container init. A race condition here would mean trying to `open("/proc/<pid>/ns/net")` before the process exists, or the container's DHCP client running before the host has set up the interface.
+
+Three pipes solve this:
+
+```
+mid_sync_pipe:   intermediate ──► monitor   (sends init_pid)
+net_ready_pipe:  init          ──► monitor   (signals "I'm alive in my netns")
+net_done_pipe:   monitor       ──► init      (sends ds_net_handshake)
+```
+
+**Sequence:**
+
+1. Intermediate process forks init, writes `init_pid` to `mid_sync_pipe`, then waits.
+2. Init signals "READY" on `net_ready_pipe` — it is alive in its private netns.
+3. Monitor reads `init_pid`, then reads the READY byte — this is the synchronization point that ensures `/proc/<init_pid>/ns/net` is valid.
+4. Monitor calls `setup_veth_host_side(cfg, init_pid)` — creates bridge, veth pair, iptables rules, moves peer veth into container's netns.
+5. Monitor derives `ds_net_handshake` (peer interface name + IP) and writes it to `net_done_pipe`.
+6. Init reads the handshake, calls `setup_veth_child_side_named()` — renames the interface to `eth0`, brings it up.
+7. Container's DHCP client (`dhclient`/`udhcpc`) sends DISCOVER; the embedded DHCP server responds with the pre-computed offer.
+
+For `--net=none`, the same pipe exchange happens (monitor sends an empty handshake), and init just brings up loopback — no veth, no DHCP.
+
+### 12.4 Subnet and Deterministic IP Assignment
+
+The NAT network uses `172.28.0.0/16` (`DS_DEFAULT_SUBNET`). Gateway is always `172.28.0.1` (`DS_NAT_GW_IP`).
+
+Container IPs are derived deterministically from the init PID using a multiplicative hash:
+
+```c
+uint32_t hash = (uint32_t)pid;
+hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
+int octet3 = (int)(((hash >> 8) % 254) + 1);  // 1–254, skips 0 (infrastructure row)
+int octet4 = (int)((hash % 254) + 1);          // 1–254, skips 0 and 255
+// Result: 172.28.<octet3>.<octet4>/16
+```
+
+This spreads sequential PIDs across the entire /16 space, preventing address collisions between concurrent containers without requiring any state or allocation table. The DHCP server is pre-loaded with this IP as the only offer — it never negotiates.
+
+### 12.5 veth Pair and Bridge Topology
+
+**Interface naming** is also PID-derived:
+- Host side: `ds-v<pid % 100000>` (e.g. `ds-v11388`)
+- Container peer: `ds-p<pid % 100000>` (e.g. `ds-p11388`)
+
+**Bridge mode** (default): The host veth is attached to `ds-br0`. The bridge holds `172.28.0.1`. DHCP server binds to `ds-br0` because the kernel delivers frames from the container to the bridge interface, not the slave — a socket bound to the slave would never see DHCP DISCOVERs.
+
+**Bridgeless fallback**: On kernels where bridge creation fails, `ds-br0` is skipped. `172.28.0.1/32` is assigned directly to the host veth, and a host route for the container IP is installed. The DHCP server binds to the veth directly.
+
+**Samsung/MTK TX checksum workaround**: After creating the veth, `ds_net_disable_tx_checksum()` clears `NETIF_F_ALL_CSUM` on the host veth via `ETHTOOL_SFEATURES`. This fixes silent packet drops on certain Qualcomm and MediaTek SoCs where the virtual NIC's checksum offload interacts badly with the software bridge.
+
+### 12.6 iptables Rules
+
+All iptables operations use the raw socket API via `ds_iptables.c` — no `iptables` binary is ever executed. Rules are installed in the correct order:
+
+```
+POSTROUTING MASQUERADE  — on all upstream interfaces, src 172.28.0.0/16
+FORWARD ACCEPT          — on ds-br0 (or ds-vXXXXX in bridgeless)
+INPUT ACCEPT            — on ds-br0 (for DHCP and DNS)
+MSS clamp               — TCPMSS --clamp-mss-to-pmtu (fixes MTU issues)
+bridge-nf-call-iptables — set to 0 to stop bridge frames hitting iptables twice
+rp_filter               — set to 0 on ds-br0 (Android strict mode breaks NAT)
+```
+
+### 12.7 Port Forwarding and the xt_addrtype Fallback
+
+Port forwarding is specified as `--port HOST:CONTAINER/PROTO` (e.g. `--port 22:22/tcp`).
+
+For each mapping, a PREROUTING DNAT rule is inserted:
+```
+-t nat -A PREROUTING -p tcp --dport 22 -m addrtype --dst-type LOCAL -j DNAT --to-destination 172.28.x.x:22
+```
+
+The `--dst-type LOCAL` match restricts the rule to packets destined for the phone's own IP — preventing the rule from accidentally matching transit traffic.
+
+**The 4.14 problem**: `xt_addrtype` (`CONFIG_NETFILTER_XT_MATCH_ADDRTYPE`) is not compiled into stock Android 4.14 kernels. If the module is absent, the DNAT insert fails silently.
+
+**The fix**: Before installing any port forward rules, `addrtype_available()` reads `/proc/net/ip_tables_matches` for the `addrtype` string. If absent, the rules are installed without `--dst-type LOCAL` — slightly less precise but functional. Both paths use `run_command_log()` which pipes stderr through `ds_log("[IPT] ...")` so failures are always visible in the log.
+
+### 12.8 The Embedded DHCP Server
+
+`ds_dhcp.c` implements a minimal RFC 2131 DHCP server as a **joinable thread** inside the monitor process. It serves exactly one lease — the deterministic IP pre-computed by `veth_peer_ip()`.
+
+**Why embedded instead of `dnsmasq`?**
+- No external binary dependency — Droidspaces is a single static binary
+- `dnsmasq` isn't available on most Android systems
+- One container = one lease = trivial implementation (no lease table needed)
+- The server can be MAC-targeted: it reads the peer veth's MAC before moving it into the container netns, and only responds to DHCP packets from that MAC
+
+**Protocol flow**:
+1. Container's DHCP client broadcasts DISCOVER
+2. Server responds with OFFER (`yiaddr` = pre-computed IP, `siaddr` = gateway, lease time = 24h)
+3. Client sends REQUEST
+4. Server sends ACK
+5. Client handles renewals (server responds to every REQUEST with the same ACK)
+
+**Stop/join safety**: `ds_dhcp_server_stop()` sets `stop=1`, calls `shutdown()` on the socket to unblock the `recvfrom()`, saves the `tid`, then calls `pthread_join(tid)` **outside the mutex**. This guarantees the thread has fully exited before `start()` can call `memset(&g_dhcp)` on a restart cycle. Without the join, two DHCP threads could run simultaneously with a corrupted shared context.
+
+### 12.9 Android Policy Routing — The `--upstream` Flag
+
+Android does not use a single default route. Every interface (`wlan0`, `rmnet_data0`, etc.) has its own routing table. The kernel uses policy rules (`ip rule`) to decide which table to consult based on source address, interface, or UID. There is no single "active" interface — both WiFi and mobile data can have simultaneous default routes in their own tables.
+
+Old approach (auto-detection): Parse `ip rule` output to guess which table was "active". Completely unreliable on MTK/Qualcomm where both interfaces have rules of equal priority.
+
+**Current approach**: The user explicitly declares which interfaces can carry upstream traffic via `--upstream wlan0,rmnet_data0`. This list is mandatory for `--net=nat`.
+
+On Android, after moving the peer veth into the container netns, `ds_net_setup_android_routing()` runs:
+
+```
+ip rule add from 172.28.0.0/16 lookup <active_table> priority 100
+ip rule add to 172.28.0.0/16 lookup <active_table> priority 200
+```
+
+`<active_table>` is the routing table number of the first declared upstream interface that is currently `IFF_UP | IFF_RUNNING` and has a default route. `ds_nl_get_iface_table()` reads this via RTNETLINK — no `ip` binary needed.
+
+This injects low-priority rules that direct container traffic through whichever upstream table is active, without disturbing Android's own routing rules.
+
+### 12.10 The Upstream Route Monitor
+
+The user can switch from WiFi to mobile data (or vice versa) while a container is running. Without handling this, the container would lose internet when the active interface changes.
+
+The route monitor is a `pthread` running `route_monitor_loop()` inside the monitor process. It:
+
+1. Opens a `NETLINK_ROUTE` socket subscribed to `RTMGRP_LINK | RTMGRP_IPV4_IFADDR`
+2. Calls `do_upstream_reprobe()` on any link state or address change event, but only for events on the declared upstream interfaces
+3. Runs a **30-second heartbeat** via `poll()` timeout to catch devices with broken netlink notifications (common on some MTK SoCs) and to re-assert `ip_forward=1` which Android's `netd` can reset at any time
+4. On reprobe, calls `find_active_upstream()` — iterates the declared upstream list in priority order, returns the first interface that is `IFF_UP | IFF_RUNNING` with a routing table
+5. If the active table changed, atomically swaps the `ip rule` (delete old, add new) and logs `[NET] Route monitor: upstream switch table X → Y`
+
+The monitor is started by `ds_net_start_route_monitor()` immediately after `setup_veth_host_side()` succeeds, and stopped by `ds_net_stop_route_monitor()` in `ds_net_cleanup()` before any teardown.
+
+### 12.11 Multi-Container Cleanup Safety
+
+Several iptables rules are **shared** across all containers — `MASQUERADE`, `FORWARD ACCEPT`, and the Android policy `ip rule` entries. Removing them while other containers are still running would immediately kill their networking.
+
+`ds_net_cleanup()` handles this safely:
+
+1. Deletes the container's own veth (`ds-vXXXXX`)
+2. Calls `ds_nl_count_ifaces_with_prefix(ctx, "ds-v")` — counts remaining `ds-v*` interfaces via RTM_GETLINK dump
+3. If count > 0: other containers are still running → only remove per-container rules (port forwards, bridgeless iface rules) → return early
+4. If count == 0: last container → remove shared rules (MASQUERADE, FORWARD, Android policy rules, bridge rules)
+
+This is the correct check because veth deletion is atomic — if `ds-vXXXXX` is gone but other `ds-v*` interfaces exist, those other containers are definitely still alive.
+
+---
+
+## 13. Status Reporting
 
 ### 12.1 Status Command
 
@@ -988,7 +1175,7 @@ Found containers are automatically registered with auto-generated names from `/p
 
 ---
 
-## 13. Build System Notes
+## 14. Build System Notes
 
 ### Compiler and Libc
 
@@ -1026,7 +1213,7 @@ All binaries go to `output/droidspaces`. An `all-build` target creates architect
 
 ---
 
-## 14. Data Structures
+## 15. Data Structures
 
 ### 14.1 struct ds_config
 
@@ -1088,7 +1275,7 @@ struct ds_tty_info {
 
 ---
 
-## 15. Recommended Reimplementation Approach
+## 16. Recommended Reimplementation Approach
 
 If you're rewriting Droidspaces from scratch, here is the checklist of every decision and every syscall, in order.
 
@@ -1261,7 +1448,7 @@ If you're rewriting Droidspaces from scratch, here is the checklist of every dec
 
 ---
 
-## 16. Project Licensing & SPDX
+## 17. Project Licensing & SPDX
 
 The Droidspaces source code is licensed under the **GNU General Public License v3.0 or later (GPL-3.0-or-later)**. 
 
@@ -1271,7 +1458,7 @@ Every source file in the `src/` directory and the `Makefile` contain standard SP
 
 ---
 
-## 17. Document License
+## 18. Document License
 
 This document is licensed under the Creative Commons Attribution 4.0 International (CC BY 4.0) License.
 You are free to share and adapt the material for any purpose, even commercially, provided you give appropriate credit,
