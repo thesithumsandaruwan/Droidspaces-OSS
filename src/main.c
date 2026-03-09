@@ -771,8 +771,6 @@ int main(int argc, char **argv) {
       ret = 1;
       goto cleanup;
     }
-    if (reset_config)
-      apply_reset_config(&cfg, cli_net_mode_set, cli_net_mode);
     enforce_nat_safety(&cfg, argc, argv);
 
     print_ds_banner();
