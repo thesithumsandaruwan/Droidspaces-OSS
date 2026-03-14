@@ -290,7 +290,7 @@ fun DroidspacesNavigation(
 
             ContainerConfigScreen(
                 initialNetMode = viewModel.netMode,
-                initialEnableIPv6 = viewModel.enableIPv6,
+                initialDisableIPv6 = viewModel.disableIPv6,
                 initialEnableAndroidStorage = viewModel.enableAndroidStorage,
                 initialEnableHwAccess = viewModel.enableHwAccess,
                 initialSelinuxPermissive = viewModel.selinuxPermissive,
@@ -303,8 +303,8 @@ fun DroidspacesNavigation(
                 initialEnvFileContent = viewModel.envFileContent ?: "",
                 initialUpstreamInterfaces = viewModel.upstreamInterfaces,
                 initialPortForwards = viewModel.portForwards,
-                onNext = { netMode, enableIPv6, enableAndroidStorage, enableHwAccess, enableTermuxX11, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, forceCgroupv1, blockNestedNs, envFileContent, upstreamInterfaces, portForwards ->
-                    viewModel.setConfig(netMode, enableIPv6, enableAndroidStorage, enableHwAccess, enableTermuxX11, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, envFileContent, upstreamInterfaces, portForwards, forceCgroupv1, blockNestedNs)
+                onNext = { netMode, disableIPv6, enableAndroidStorage, enableHwAccess, enableTermuxX11, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, forceCgroupv1, blockNestedNs, envFileContent, upstreamInterfaces, portForwards ->
+                    viewModel.setConfig(netMode, disableIPv6, enableAndroidStorage, enableHwAccess, enableTermuxX11, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, envFileContent, upstreamInterfaces, portForwards, forceCgroupv1, blockNestedNs)
                     navController.navigate(Screen.SparseImageConfig.route)
                 },
                 onBack = {
