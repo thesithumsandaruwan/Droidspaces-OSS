@@ -302,6 +302,7 @@ cmd_migrate() {
     # Step 3: Mount sparse image to temp dir
     log "[3/5] Mounting sparse image..."
     _mkdir "$ROOTFS_SPARSE"
+    chcon u:object_r:vold_data_file:s0 "$tmp_img" 2>/dev/null || true
     if ! _mount -t ext4 -o loop,rw,noatime,nodiratime,data=ordered,commit=30 \
             "$tmp_img" "$ROOTFS_SPARSE"; then
         exit 1
