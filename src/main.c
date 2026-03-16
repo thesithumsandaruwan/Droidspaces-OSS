@@ -868,7 +868,7 @@ int main(int argc, char **argv) {
       ret = 1;
       goto cleanup;
     }
-    const char *user = (optind + 1 < argc) ? argv[optind + 1] : NULL;
+    const char *user = (optind + 1 < argc) ? argv[optind + 1] : "root";
     ret = enter_rootfs(&cfg, user);
     goto cleanup;
   }

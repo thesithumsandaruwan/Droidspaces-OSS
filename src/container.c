@@ -809,7 +809,8 @@ int start_rootfs(struct ds_config *cfg) {
 
             /* Start the DNS proxy on 172.28.0.1:53.  Must come after
              * setup_veth_host_side() so the bridge IP is already assigned.
-             * Skipped when --dns was given (custom servers bypass the proxy). */
+             * Skipped when --dns was given (custom servers bypass the proxy).
+             */
             ds_dns_proxy_start(cfg, netns_pid);
           }
         }
@@ -1271,8 +1272,7 @@ int enter_rootfs(struct ds_config *cfg, const char *user) {
     ds_log_silent = prev_silent;
   }
 
-  ds_log("Entering container '%s' as %s...", cfg->container_name,
-         user ? user : "root");
+  ds_log("Entering container '%s' as %s...", cfg->container_name, user);
 
   int sv[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
@@ -1387,32 +1387,33 @@ int enter_rootfs(struct ds_config *cfg, const char *user) {
 
       extern char **environ;
 
-      if (user && user[0]) {
-        char *shell_argv[] = {"su", "-l", (char *)(uintptr_t)user, NULL};
-        execve("/bin/su", shell_argv, environ);
-        execve("/usr/bin/su", shell_argv, environ);
-      }
+      /* Primary path: proper login via su -l <user>.
+       * This gives the correct home directory, shell, and login environment
+       * from the container's /etc/passwd.  user is always non-NULL here
+       * (main.c defaults to "root" when no argument is given). */
+      char *shell_argv[] = {"su", "-l", (char *)(uintptr_t)user, NULL};
+      execve("/bin/su", shell_argv, environ);
+      execve("/usr/bin/su", shell_argv, environ);
 
-      /* Try to detect user's default shell from /etc/passwd first */
+      /* Fallback: su not available - look up the shell from /etc/passwd */
       char user_shell[PATH_MAX] = {0};
-      if (get_user_shell(user && user[0] ? user : "root", user_shell,
-                         sizeof(user_shell)) == 0) {
+      if (get_user_shell(user, user_shell, sizeof(user_shell)) == 0) {
         if (access(user_shell, X_OK) == 0) {
           const char *sh_name = strrchr(user_shell, '/');
           sh_name = sh_name ? sh_name + 1 : user_shell;
-          char *shell_argv[] = {(char *)(uintptr_t)sh_name, "-l", NULL};
-          execve(user_shell, shell_argv, environ);
+          char *sh_argv[] = {(char *)(uintptr_t)sh_name, "-l", NULL};
+          execve(user_shell, sh_argv, environ);
         }
       }
 
-      /* Fallback: Try shells in priority order */
+      /* Last resort: try shells in priority order */
       const char *shells[] = {"/bin/bash", "/bin/ash", "/bin/sh", NULL};
       for (int i = 0; shells[i]; i++) {
         if (access(shells[i], X_OK) == 0) {
           const char *sh_name = strrchr(shells[i], '/');
           sh_name = sh_name ? sh_name + 1 : shells[i];
-          char *shell_argv[] = {(char *)(uintptr_t)sh_name, "-l", NULL};
-          execve(shells[i], shell_argv, environ);
+          char *sh_argv[] = {(char *)(uintptr_t)sh_name, "-l", NULL};
+          execve(shells[i], sh_argv, environ);
         }
       }
 
@@ -1520,7 +1521,33 @@ int run_in_rootfs(struct ds_config *cfg, int argc, char **argv) {
       ds_env_boot_setup(cfg);
       load_etc_environment();
 
-      /* If single argument with spaces, run via /bin/sh -c */
+      /* Run the command as root with a proper login context (su -l root -c).
+       * This mirrors enter_rootfs: correct home dir, PATH, and shell env.
+       *
+       * Build a single command string from argv so su -c can receive it.
+       * Each argument is space-separated; arguments with spaces are not
+       * re-quoted here (the caller is responsible for quoting), matching
+       * the existing execvp(argv[0], argv) behaviour. */
+      char cmd_buf[65536] = {0};
+      size_t pos = 0;
+      for (int i = 0; argv[i] != NULL; i++) {
+        if (i > 0 && pos < sizeof(cmd_buf) - 1)
+          cmd_buf[pos++] = ' ';
+        size_t rem = sizeof(cmd_buf) - pos - 1;
+        size_t n = strlen(argv[i]);
+        if (n > rem)
+          n = rem;
+        memcpy(cmd_buf + pos, argv[i], n);
+        pos += n;
+      }
+      cmd_buf[pos] = '\0';
+
+      /* Primary: proper root login via su */
+      char *su_argv[] = {"su", "-l", "root", "-c", cmd_buf, NULL};
+      execve("/bin/su", su_argv, environ);
+      execve("/usr/bin/su", su_argv, environ);
+
+      /* Fallback: su not available - direct exec (no login context) */
       if (argv[1] == NULL && strchr(argv[0], ' ') != NULL) {
         char *shell_argv[] = {"/bin/sh", "-c", argv[0], NULL};
         execvp("/bin/sh", shell_argv);
