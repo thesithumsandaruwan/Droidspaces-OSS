@@ -925,9 +925,17 @@ int start_rootfs(struct ds_config *cfg) {
       /* Reload configuration from disk if available (merge strategy) */
       if (cfg->config_file[0]) {
         free_config_binds(cfg);
-        free_config_env_vars(cfg);
+        /* Do NOT free env_vars here; preserve them across the internal reboot
+         */
+        struct ds_env_var *saved_vars = cfg->env_vars;
+        int saved_count = cfg->env_var_count;
+        int saved_cap = cfg->env_var_capacity;
+
         struct ds_config reboot_cfg = *cfg;
         if (ds_config_load(cfg->config_file, &reboot_cfg) == 0) {
+          reboot_cfg.env_vars = saved_vars;
+          reboot_cfg.env_var_count = saved_count;
+          reboot_cfg.env_var_capacity = saved_cap;
           if (strcmp(cfg->dns_servers, reboot_cfg.dns_servers) != 0) {
             reboot_cfg.dns_server_content[0] = '\0';
             ds_get_dns_servers(reboot_cfg.dns_servers,
