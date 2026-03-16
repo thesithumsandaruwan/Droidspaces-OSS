@@ -190,17 +190,18 @@ int ds_apply_jail_mask(int hw_access) {
                                    NULL};
 
   /* Standard mode masks - restricted to protect host kernel surface */
-  const char *standard_masks[] = {"/proc/keys",
-                                  "/proc/partitions",
-                                  "/proc/diskstats",
-                                  "/sys/devices/virtual/powercap",
-                                  "/sys/kernel/debug",
-                                  "/sys/kernel/security",
-                                  "/sys/kernel/tracing",
-                                  "/sys/block",
-                                  "/sys/dev/block",
-                                  "/sys/class/block",
-                                  NULL};
+  const char *standard_masks[] = {
+      "/proc/keys",          "/proc/partitions",
+      "/proc/diskstats",     "/sys/devices/virtual/powercap",
+      "/sys/kernel/debug",   "/sys/kernel/security",
+      "/sys/kernel/tracing", "/sys/block",
+      "/sys/dev/block",      "/sys/class/block",
+      "/proc/mtk_mali",      "/proc/gpufreqv2",
+      "/proc/mmdvfs",        "/proc/mmqos",
+      "/proc/displowpower",  "/proc/mtkfb_debug",
+      "/proc/mtk_mdp_debug", "/proc/touch_boost",
+      "/proc/perfmgr",       "/proc/perfmgr_touch_boost",
+      "/proc/mtk_scheduler", NULL};
 
   /* Standard mode read-only remounts */
   const char *standard_ro[] = {"/proc/bus",     "/proc/fs",   "/proc/irq",
@@ -208,10 +209,17 @@ int ds_apply_jail_mask(int hw_access) {
                                "/sys/firmware", NULL};
 
   /* Surgical sysctl protection - global settings that affect the host */
-  const char *standard_surgical_ro[] = {
-      "/proc/sys/kernel/panic",        "/proc/sys/kernel/panic_on_oops",
-      "/proc/sys/kernel/core_pattern", "/proc/sys/kernel/modprobe",
-      "/proc/sys/vm/panic_on_oom",     NULL};
+  const char *standard_surgical_ro[] = {"/proc/sys/kernel/panic",
+                                        "/proc/sys/kernel/panic_on_oops",
+                                        "/proc/sys/kernel/core_pattern",
+                                        "/proc/sys/kernel/modprobe",
+                                        "/proc/sys/vm/panic_on_oom",
+                                        "/proc/sys/vm/max_map_count",
+                                        "/proc/sys/vm/overcommit_memory",
+                                        "/proc/sys/vm/overcommit_ratio",
+                                        "/proc/sys/vm/drop_caches",
+                                        "/proc/sys/vm/swappiness",
+                                        NULL};
 
   /* Apply universal masks */
   for (int i = 0; universal_masks[i]; i++) {
