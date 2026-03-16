@@ -75,7 +75,7 @@ typedef struct {
   pid_t container_pid;
 } ds_dns_proxy_ctx_t;
 
-static ds_dns_proxy_ctx_t g_proxy;
+static ds_dns_proxy_ctx_t g_proxy = {.sock = -1};
 static pthread_mutex_t g_proxy_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---------------------------------------------------------------------------

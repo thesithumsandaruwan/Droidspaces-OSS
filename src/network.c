@@ -1201,15 +1201,13 @@ void ds_net_cleanup(struct ds_config *cfg, pid_t container_pid) {
     /* still proceed with iptables cleanup */
   } else {
     veth_host_name(effective_pid, veth_host, sizeof(veth_host));
-    ds_dhcp_server_stop();
-    ds_dns_proxy_stop();
     ds_nl_del_link(ctx, veth_host);
   }
 
   /* Check how many ds-v* veths remain AFTER deleting ours.
-   * Shared rules (MASQUERADE, FORWARD, Android policy) must only be removed
-   * when we are the last container — removing them while others are running
-   * would kill their networking immediately. */
+   * Shared resources (DHCP server, DNS proxy, MASQUERADE, FORWARD, Android
+   * policy rules) must only be torn down when we are the last container.
+   * Stopping them while others are running kills their networking. */
   int surviving = ds_nl_count_ifaces_with_prefix(ctx, "ds-v");
   if (surviving > 0) {
     ds_log("[NET] cleanup: %d other container(s) still running — "
@@ -1221,6 +1219,10 @@ void ds_net_cleanup(struct ds_config *cfg, pid_t container_pid) {
     ds_nl_close(ctx);
     return;
   }
+
+  /* Last container — safe to stop shared services and remove shared rules */
+  ds_dhcp_server_stop();
+  ds_dns_proxy_stop();
 
   /* 2. Remove Android policy rules (last container — safe to clean up) */
   if (is_android()) {
