@@ -156,16 +156,27 @@ chcon u:object_r:vold_data_file:s0 /path/to/rootfs.img
 
 ## DNS / Name Resolution Issues
 
-**Symptoms:** Internet works (IPs can be pinged), but domain names fail to resolve. `resolv.conf` is overwritten with "127.0.0.53" or other incorrect settings even after using `--dns`.
+**Symptoms:** Internet works (you can ping IPs), but domain names fail to resolve, even though `/etc/resolv.conf` has the correct DNS nameservers. This issue happens especially with Mobile Data, but can also occur on Wi-Fi with some ISPs.
 
-**Cause:** `systemd-resolved` is running inside the container and attempting to manage DNS locally, often overwriting the static `/etc/resolv.conf` provided by Droidspaces.
+**Cause:** It seems some ISPs don’t like custom DNS setups. They completely block common DNS servers like `8.8.8.8` and `1.1.1.1`.
 
-**Solution:** Mask the `systemd-resolved` service to allow the container to use Droidspaces' static DNS configuration:
+**Solution:** Use your ISP’s own DNS servers instead of custom ones.
 
-1. **Via Android App**: Go to **Panel** -> **Container Name** -> **Manage** (Systemd Menu), find `systemd-resolved`, tap the 3-dot icon, and select **Mask**.
-2. **Via Terminal**:
+1. Run this command in an Android root shell to get the default DNS addresses your ISP assigned:
+
+   ```shell
+   dumpsys connectivity | sed 's/}}/\n/g' | grep 'InterfaceName: wlan0' | grep -o 'DnsAddresses: \[[^]]*\]' | grep -o '/[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | tr -d '/'
+   ```
+
+2. Add the results as DNS servers by editing the container configuration in the Droidspaces app.
+
+3. Run this command as root inside the container to tell `systemd-resolved` not to use its own DNS proxy server (Droidspaces v5.7.0 already uses this hack. Only applicable to containers created before Droidspaces v5.7.0 was released):
+
    ```bash
-   sudo systemctl mask systemd-resolved
+   cat > "/etc/systemd/resolved.conf.d/dns.conf" << 'EOF'
+   [Resolve]
+   DNSStubListener=no
+   EOF
    ```
 
 ---
