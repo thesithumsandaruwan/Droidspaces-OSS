@@ -26,6 +26,70 @@
 #endif
 
 /*
+ * Shared GPU/hardware device lists.
+ *
+ * Both scan_host_gpu_gids() and mirror_gpu_nodes() iterate these tables.
+ * Add new devices here once; both functions pick them up automatically.
+ */
+
+/* Dynamic directories: { host_dir, prefix_or_NULL } */
+static const struct {
+  const char *dir;
+  const char *prefix;
+} gpu_scan_dirs[] = {
+    {"/dev/dri", "renderD"},    {"/dev", "nvidia"}, {"/dev", "video"},
+    {"/dev/nvidia-caps", NULL}, {"/dev", "mali"},   {"/dev", "kgsl"},
+    {"/dev/dma_heap", NULL},    {NULL, NULL}, /* sentinel */
+};
+
+/* Static paths: individual nodes that don't fit a directory scan */
+static const char *gpu_static_devices[] = {
+    /* Android IPC (Critical for Android containers/hosts) */
+    "/dev/binder",
+    "/dev/vndbinder",
+    "/dev/hwbinder",
+
+    /* Legacy Android Memory Allocators */
+    "/dev/ion",
+    "/dev/ashmem",
+
+    /* ARM Mali / Adreno aliases */
+    "/dev/mali",
+    "/dev/genlock",
+
+    /* AMD ROCm Compute */
+    "/dev/kfd",
+
+    /* PowerVR */
+    "/dev/pvrsrvkm",
+    "/dev/pvr_sync",
+
+    /* Tegra */
+    "/dev/nvhost-ctrl",
+    "/dev/nvhost-gpu",
+    "/dev/nvhost-ctrl-gpu",
+    "/dev/nvhost-as-gpu",
+    "/dev/nvhost-dbg-gpu",
+    "/dev/nvhost-prof-gpu",
+    "/dev/nvhost-tsg",
+    "/dev/nvhost-tsg-gpu",
+    "/dev/nvhost-vic",
+    "/dev/nvhost-nvdec",
+    "/dev/nvhost-nvdec1",
+    "/dev/nvhost-nvenc",
+    "/dev/nvhost-msenc",
+    "/dev/nvmap",
+
+    /* WSL2 */
+    "/dev/dxg",
+
+    /* Async Sync */
+    "/dev/sw_sync",
+
+    NULL, /* sentinel */
+};
+
+/*
  * is_dangerous_node()
  *
  * Checks if a device node name is "dangerous" (part of the host display stack
@@ -135,11 +199,11 @@ int is_dangerous_node(const char *name) {
   /* Tier 12: Virtual Consoles */
   if (strncmp(name, "vcs", 3) == 0)
     return 1;
-  /* Tier 13: Watchdogs (Aggressive catch) */
+  /* Tier 13: Watchdogs */
   if (strstr(name, "watchdog") != NULL)
     return 1;
 
-  /* Tier 13.5: Qualcomm RPC & Secure Interfaces (High Risk) */
+  /* Tier 13.5: Qualcomm RPC & Secure Interfaces */
   if (strstr(name, "qseecom") != NULL || strstr(name, "smcinvoke") != NULL ||
       strstr(name, "adsprpc") != NULL)
     return 1;
@@ -147,7 +211,7 @@ int is_dangerous_node(const char *name) {
   /* Tier 14: DMA/Memory Gaps */
   if (strcmp(name, "udmabuf") == 0 || strcmp(name, "snapshot") == 0)
     return 1;
-  /* Tier 15: TPM (KVM preserved for VMs) */
+  /* Tier 15: TPM */
   if (strncmp(name, "tpm", 3) == 0)
     return 1;
   /* Tier 16: MTK STP Combo Chip Bus (BT/GPS/WiFi transport) */
@@ -294,7 +358,7 @@ int is_dangerous_node(const char *name) {
   if (strcmp(name, "ccic_misc") == 0 || strcmp(name, "hqm_event") == 0)
     return 1;
 
-  /* Tier 37: The S10 "Ghost" Tier (Exynos/Samsung specific) */
+  /* Tier 37: Exynos/Samsung specific */
   if (strstr(name, "multipdp") != NULL || strncmp(name, "ttyBCM", 6) == 0)
     return 1; /* Catch dymmy/dummy and Broadcom consoles */
   if (strcmp(name, "s5p-smem") == 0 || strncmp(name, "als_", 4) == 0)
@@ -334,7 +398,7 @@ static void add_gpu_gid(const char *path, gid_t *gids, int *count,
 
   if (*count < max_gids) {
     gids[(*count)++] = gid;
-    ds_log("GPU device %-30s → GID %d", path, (int)gid);
+    ds_log("[GPU] GPU device %-30s → GID %d", path, (int)gid);
   }
 }
 
@@ -388,56 +452,155 @@ static void scan_gpu_dir(const char *dir_path, const char *prefix, gid_t *gids,
 int scan_host_gpu_gids(gid_t *gids, int max_gids) {
   int count = 0;
 
-  /* 1. Dynamic Scanning (Render Nodes, NVIDIA, V4L2, etc.) */
-  scan_gpu_dir("/dev/dri", "renderD", gids, &count, max_gids);
-  scan_gpu_dir("/dev", "nvidia", gids, &count, max_gids);
-  scan_gpu_dir("/dev", "video", gids, &count, max_gids);
-  scan_gpu_dir("/dev/nvidia-caps", NULL, gids, &count, max_gids);
-  scan_gpu_dir("/dev", "mali", gids, &count, max_gids);
-  scan_gpu_dir("/dev", "kgsl", gids, &count, max_gids);
-  scan_gpu_dir("/dev/dma_heap", NULL, gids, &count, max_gids);
+  /* 1. Dynamic directories */
+  for (int i = 0; gpu_scan_dirs[i].dir != NULL; i++)
+    scan_gpu_dir(gpu_scan_dirs[i].dir, gpu_scan_dirs[i].prefix, gids, &count,
+                 max_gids);
 
-  /* 2. Static Comprehensive List (IPC, Compute, Tegra/PVR specific) */
-  const char *static_devices[] = {
-      /* Android IPC (Critical for Android containers/hosts) */
-      "/dev/binder", "/dev/vndbinder", "/dev/hwbinder",
+  /* 2. Static individual nodes */
+  for (int i = 0; gpu_static_devices[i] != NULL; i++)
+    add_gpu_gid(gpu_static_devices[i], gids, &count, max_gids);
 
-      /* Legacy Android Memory Allocators */
-      "/dev/ion", "/dev/ashmem",
-
-      /* ARM Mali / Adreno aliases */
-      "/dev/mali", "/dev/genlock",
-
-      /* AMD ROCm Compute */
-      "/dev/kfd",
-
-      /* PowerVR (IMG GPU) */
-      "/dev/pvrsrvkm", "/dev/pvr_sync",
-
-      /* Tegra (Comprehensive stack) */
-      "/dev/nvhost-ctrl", "/dev/nvhost-gpu", "/dev/nvhost-ctrl-gpu",
-      "/dev/nvhost-as-gpu", "/dev/nvhost-dbg-gpu", "/dev/nvhost-prof-gpu",
-      "/dev/nvhost-tsg", "/dev/nvhost-tsg-gpu", "/dev/nvhost-vic",
-      "/dev/nvhost-nvdec", "/dev/nvhost-nvdec1", "/dev/nvhost-nvenc",
-      "/dev/nvhost-msenc", "/dev/nvmap",
-
-      /* WSL2 (DirectX Proxy) */
-      "/dev/dxg",
-
-      /* Async Sync */
-      "/dev/sw_sync",
-
-      NULL};
-
-  for (int i = 0; static_devices[i] != NULL; i++) {
-    add_gpu_gid(static_devices[i], gids, &count, max_gids);
-  }
-
-  if (count > 0) {
-    ds_log("Discovered %d unique GPU/Hardware group(s)", count);
-  }
+  if (count > 0)
+    ds_log("[GPU] Discovered %d unique GPU/Hardware group(s)", count);
 
   return count;
+}
+
+/*
+ * mirror_gpu_node()
+ *
+ * For a single host GPU device path: if the node is absent or wrongly a
+ * directory in the container's /dev, fix it with mknod().
+ *
+ * Background: on Android, /dev is a plain tmpfs populated by ueventd - NOT
+ * the kernel's devtmpfs.  So GPU nodes like /dev/kgsl-3d0, /dev/mali0 and
+ * /dev/dri/renderD128 exist in ueventd's tmpfs but are absent (or appear as
+ * empty directories) when we mount a fresh devtmpfs inside the container.
+ * scan_host_gpu_gids() already detected those host nodes; here we just make
+ * sure a matching character device node is present in the container /dev.
+ */
+static void mirror_gpu_node(const char *host_path, const char *dev_path) {
+  /* host_path must be rooted under /dev/ */
+  if (strncmp(host_path, "/dev/", 5) != 0)
+    return;
+
+  /* Trusted GPU list gate: never mirror dangerous/sensitive nodes.
+   * This check lives here - not only in callers - so every code path
+   * (dynamic dir scan AND static list) is covered by one consistent rule. */
+  const char *node_name = strrchr(host_path, '/');
+  node_name = node_name ? node_name + 1 : host_path;
+  if (is_dangerous_node(node_name))
+    return;
+
+  /* Host node must be a character device.  Applies to BOTH root-owned
+   * (gid=0) and group-owned nodes - we do not filter by ownership here.
+   * add_gpu_gid() skips gid=0 because there is nothing to add to the
+   * group list, but mirroring must still happen so the node is physically
+   * present in devtmpfs regardless of who owns it. */
+  struct stat host_st;
+  if (stat(host_path, &host_st) < 0)
+    return;
+  if (!S_ISCHR(host_st.st_mode))
+    return;
+
+  /* Build the container-side target path */
+  const char *rel = host_path + 5; /* strip leading "/dev/" */
+  char tgt[PATH_MAX];
+  snprintf(tgt, sizeof(tgt), "%s/%s", dev_path, rel);
+
+  /* Ensure the parent directory exists (handles /dev/dri/renderD128 etc.) */
+  char parent[PATH_MAX];
+  snprintf(parent, sizeof(parent), "%s", tgt);
+  char *slash = strrchr(parent, '/');
+  if (slash && slash != parent) {
+    *slash = '\0';
+    mkdir(parent, 0755); /* best-effort - already exists is fine */
+  }
+
+  /* Check current state of the target */
+  struct stat tgt_st;
+  if (lstat(tgt, &tgt_st) == 0) {
+    if (S_ISCHR(tgt_st.st_mode))
+      return; /* devtmpfs already has a proper node - nothing to do */
+
+    /* devtmpfs created an empty directory placeholder instead of a node
+     * (the /dev/kgsl-3d0 case seen in the screenshot).  Nuke it. */
+    if (S_ISDIR(tgt_st.st_mode)) {
+      if (rmdir(tgt) < 0) {
+        ds_warn("[GPU] Cannot remove stale directory %s: %s", tgt,
+                strerror(errno));
+        return;
+      }
+    } else {
+      unlink(tgt);
+    }
+  }
+
+  /* Create the node with the same major:minor and permissions as the host */
+  mode_t mode = S_IFCHR | (host_st.st_mode & 0666);
+  if (mknod(tgt, mode, host_st.st_rdev) < 0) {
+    ds_warn("[GPU] mknod %s (%d:%d) failed: %s", tgt,
+            (int)major(host_st.st_rdev), (int)minor(host_st.st_rdev),
+            strerror(errno));
+    return;
+  }
+  chmod(tgt, host_st.st_mode & 0666);
+  ds_log("[GPU] Mirrored missing node: %-30s (%d:%d)", tgt,
+         (int)major(host_st.st_rdev), (int)minor(host_st.st_rdev));
+}
+
+/*
+ * do_mirror_gpu_dir()
+ *
+ * Walk a host directory (e.g. /dev/dri, /dev/dma_heap) and call
+ * mirror_gpu_node() for every entry that matches the optional prefix.
+ *
+ * We deliberately do NOT pre-filter by d_type here.  d_type can be
+ * DT_UNKNOWN on some Android kernels/filesystems, which would silently
+ * drop valid root-owned char devices before mirror_gpu_node() ever sees
+ * them.  mirror_gpu_node() already does a stat()+S_ISCHR check and the
+ * is_dangerous_node() gate - those are the single source of truth.
+ */
+static void do_mirror_gpu_dir(const char *host_dir, const char *prefix,
+                              const char *dev_path) {
+  DIR *dir = opendir(host_dir);
+  if (!dir)
+    return;
+
+  struct dirent *entry;
+  char full_path[PATH_MAX];
+
+  while ((entry = readdir(dir)) != NULL) {
+    if (entry->d_name[0] == '.')
+      continue;
+    if (prefix && strncmp(entry->d_name, prefix, strlen(prefix)) != 0)
+      continue;
+
+    snprintf(full_path, sizeof(full_path), "%s/%s", host_dir, entry->d_name);
+    mirror_gpu_node(full_path, dev_path);
+  }
+
+  closedir(dir);
+}
+
+/*
+ * mirror_gpu_nodes()
+ *
+ * Public entry point called from setup_dev() immediately after devtmpfs is
+ * mounted.  Mirrors every GPU/hardware device node that scan_host_gpu_gids()
+ * would detect, using the same scan paths so behaviour is always in sync.
+ *
+ * Must be called BEFORE pivot_root while the host /dev is still accessible.
+ */
+void mirror_gpu_nodes(const char *dev_path) {
+  /* Dynamic directories */
+  for (int i = 0; gpu_scan_dirs[i].dir != NULL; i++)
+    do_mirror_gpu_dir(gpu_scan_dirs[i].dir, gpu_scan_dirs[i].prefix, dev_path);
+
+  /* Static individual nodes */
+  for (int i = 0; gpu_static_devices[i] != NULL; i++)
+    mirror_gpu_node(gpu_static_devices[i], dev_path);
 }
 
 /*
@@ -577,7 +740,8 @@ int setup_gpu_groups(gid_t *gpu_gids, int gid_count) {
             fprintf(fout, "%.*s:root\n", (int)(users_ptr - line_copy - 1),
                     line_copy);
 
-          ds_log("Added root to existing group '%s' (GID %d)", name, gid_val);
+          ds_log("[GPU] Added root to existing group '%s' (GID %d)", name,
+                 gid_val);
           modified_count++;
           continue; /* Skip the default fputs below */
         }
@@ -592,7 +756,7 @@ int setup_gpu_groups(gid_t *gpu_gids, int gid_count) {
   for (int i = 0; i < gid_count; i++) {
     if (!found_gids[i]) {
       fprintf(fout, "gpu_%d:x:%d:root\n", (int)gpu_gids[i], (int)gpu_gids[i]);
-      ds_log("Created new GPU group gpu_%d (GID %d)", (int)gpu_gids[i],
+      ds_log("[GPU] Created new GPU group gpu_%d (GID %d)", (int)gpu_gids[i],
              (int)gpu_gids[i]);
       modified_count++;
     }
@@ -609,7 +773,7 @@ int setup_gpu_groups(gid_t *gpu_gids, int gid_count) {
       unlink(tmp_path);
       return -1;
     }
-    ds_log("Finalized GPU group membership (Updated %d entry/entries)",
+    ds_log("[GPU] Finalized GPU group membership (Updated %d entry/entries)",
            modified_count);
   } else {
     unlink(tmp_path);

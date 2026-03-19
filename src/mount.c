@@ -487,6 +487,13 @@ int setup_dev(const char *rootfs, int hw_access) {
        * character devices to prevent host breakage. This also performs
        * DRM master and host display isolation. */
       prune_host_devices(dev_path);
+
+      /* devtmpfs is the kernel's own instance and does NOT contain nodes
+       * that Android's ueventd created in its tmpfs-based /dev (kgsl-3d0,
+       * mali0, dri/renderD128, etc.).  Mirror any missing GPU/hardware nodes
+       * from the host into the freshly mounted devtmpfs now, before
+       * create_devices() lays down the standard char nodes. */
+      mirror_gpu_nodes(dev_path);
     } else {
       ds_warn("Failed to mount devtmpfs, falling back to tmpfs");
       if (domount("none", dev_path, "tmpfs", MS_NOSUID | MS_NOEXEC,

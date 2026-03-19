@@ -447,6 +447,7 @@ void ds_cgroup_cleanup_container(const char *container_name);
  * ---------------------------------------------------------------------------*/
 
 int scan_host_gpu_gids(gid_t *gids, int max_gids);
+void mirror_gpu_nodes(const char *dev_path);
 int setup_gpu_groups(gid_t *gpu_gids, int gid_count);
 void stop_termux_if_running(void);
 int setup_unified_tmpfs(void);
