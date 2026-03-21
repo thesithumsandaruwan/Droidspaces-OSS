@@ -320,6 +320,7 @@ sudo ./droidspaces check
 | Document | Description |
 |----------|-------------|
 | [Feature Deep Dives](Documentation/Features.md) | Detailed explanation of each major feature. |
+| [Cool Things You Can Do](Documentation/Cool-things-you-can-do.md) | Advanced setups like Secure Mobile Server with Tailscale. |
 | [Troubleshooting](Documentation/Troubleshooting.md) | Common issues and their solutions. |
 | [Uninstallation Guide](Documentation/Uninstallation.md) | How to remove Droidspaces from your system. |
 
