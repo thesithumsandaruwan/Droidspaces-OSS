@@ -31,6 +31,7 @@ object Constants {
     const val KEY_DARK_THEME = "dark_theme"
     const val KEY_AMOLED_MODE = "amoled_mode"
     const val KEY_USE_DYNAMIC_COLOR = "use_dynamic_color"
+    const val KEY_THEME_PALETTE = "theme_palette"
     const val KEY_APP_LOCALE = "app_locale"
 
     // Container log cache prefix

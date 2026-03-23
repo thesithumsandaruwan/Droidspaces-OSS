@@ -36,7 +36,9 @@ import android.content.Intent
 import android.net.Uri
 import com.droidspaces.app.R
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.droidspaces.app.ui.component.AccentColorPicker
 import com.droidspaces.app.ui.component.SwitchItem
+import com.droidspaces.app.ui.theme.ThemePalette
 import com.droidspaces.app.ui.theme.rememberThemeState
 import com.droidspaces.app.ui.viewmodel.AppStateViewModel
 import com.droidspaces.app.util.PreferencesManager
@@ -280,6 +282,18 @@ fun SettingsScreen(
                     onCheckedChange = { checked ->
                         prefsManager.useDynamicColor = checked
                         // Theme state updates automatically via SharedPreferences listener
+                    }
+                )
+            }
+
+            // Accent Color Picker - show when dynamic color is off,
+            // or always show on devices below Android 12 (no dynamic color support)
+            if (!useDynamicColor || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+                AccentColorPicker(
+                    selectedPalette = themeState.themePalette,
+                    isDarkTheme = darkTheme,
+                    onPaletteSelected = { palette ->
+                        prefsManager.themePalette = palette.name
                     }
                 )
             }

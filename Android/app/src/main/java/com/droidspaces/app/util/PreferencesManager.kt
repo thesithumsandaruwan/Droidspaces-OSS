@@ -116,6 +116,12 @@ class PreferencesManager private constructor(context: Context) {
             prefs.edit().putBoolean(KEY_USE_DYNAMIC_COLOR, value).apply()
         }
 
+    var themePalette: String
+        get() = prefs.getString(KEY_THEME_PALETTE, "CATPPUCCIN") ?: "CATPPUCCIN"
+        set(value) {
+            prefs.edit().putString(KEY_THEME_PALETTE, value).apply()
+        }
+
     /**
      * Store container logs in cache (only last action).
      * Format: "level:message\nlevel:message\n..."
@@ -214,6 +220,7 @@ class PreferencesManager private constructor(context: Context) {
         private const val KEY_DARK_THEME = Constants.KEY_DARK_THEME
         private const val KEY_AMOLED_MODE = Constants.KEY_AMOLED_MODE
         private const val KEY_USE_DYNAMIC_COLOR = Constants.KEY_USE_DYNAMIC_COLOR
+        private const val KEY_THEME_PALETTE = Constants.KEY_THEME_PALETTE
         private const val KEY_CONTAINER_LOG_PREFIX = Constants.KEY_CONTAINER_LOG_PREFIX
         private const val KEY_CONTAINER_OS_INFO_PREFIX = Constants.KEY_CONTAINER_OS_INFO_PREFIX
 

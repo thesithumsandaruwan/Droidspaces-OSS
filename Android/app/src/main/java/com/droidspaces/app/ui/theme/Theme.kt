@@ -13,16 +13,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 
-private val DarkColorScheme = darkColorScheme(
-    primary = PRIMARY,
-    secondary = PRIMARY_DARK,
-    tertiary = SECONDARY_DARK
+/**
+ * Create a dark color scheme from the given [ThemePalette].
+ */
+private fun darkColorSchemeFor(palette: ThemePalette): ColorScheme = darkColorScheme(
+    primary = palette.primaryDark,
+    secondary = palette.secondaryDark,
+    tertiary = palette.tertiaryDark
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = PRIMARY,
-    secondary = PRIMARY_LIGHT,
-    tertiary = SECONDARY_LIGHT
+/**
+ * Create a light color scheme from the given [ThemePalette].
+ */
+private fun lightColorSchemeFor(palette: ThemePalette): ColorScheme = lightColorScheme(
+    primary = palette.primaryLight,
+    secondary = palette.secondaryLight,
+    tertiary = palette.tertiaryLight
 )
 
 /**
@@ -37,7 +43,8 @@ private object AmoledColorCache {
     // Pre-compute all AMOLED blends at initialization - zero runtime cost
     private const val AMOLED_BLEND_RATIO = 0.6f
 
-    // Cache for static scheme blends (computed once, never changes)
+    // Cache for static scheme blends keyed by palette name
+    private var cachedPaletteName: String? = null
     private var cachedStaticAmoledScheme: ColorScheme? = null
 
     // Note: Dynamic color schemes are not cached as they change with system wallpaper
@@ -88,20 +95,24 @@ private object AmoledColorCache {
     }
 
     /**
-     * Create AMOLED-optimized color scheme from static scheme.
+     * Create AMOLED-optimized color scheme from static (palette-based) scheme.
      * Pre-computes all blends to eliminate runtime calculations.
      *
      * For AMOLED mode, we use lighter blends for surfaceVariant to ensure cards are visible
      * against the pure black background. DARK_GREY blended too heavily becomes invisible.
      */
-    fun createStaticAmoledScheme(): ColorScheme {
-        // Return cached if available
-        cachedStaticAmoledScheme?.let { return it }
+    fun createStaticAmoledScheme(palette: ThemePalette): ColorScheme {
+        // Return cached if same palette
+        if (cachedPaletteName == palette.name && cachedStaticAmoledScheme != null) {
+            return cachedStaticAmoledScheme!!
+        }
+
+        val baseScheme = darkColorSchemeFor(palette)
 
         // Pre-compute all blends once
         // Use lighter blend (0.4f) for surfaceVariant to ensure visibility on black background
         // This creates a subtle dark gray that's visible but still maintains AMOLED aesthetic
-        val scheme = DarkColorScheme.copy(
+        val scheme = baseScheme.copy(
             background = AMOLED_BLACK,
             surface = AMOLED_BLACK,
             surfaceVariant = DARK_GREY.fastBlend(AMOLED_BLACK, 0.4f), // Lighter blend for visibility
@@ -112,6 +123,7 @@ private object AmoledColorCache {
             surfaceContainerHighest = DARK_GREY.fastBlend(AMOLED_BLACK, 0.5f),
         )
 
+        cachedPaletteName = palette.name
         cachedStaticAmoledScheme = scheme
         return scheme
     }
@@ -123,13 +135,14 @@ fun DroidspacesTheme(
     // Dynamic color is available on Android 12+
     dynamicColor: Boolean = true,
     amoledMode: Boolean = false,
+    themePalette: ThemePalette = ThemePalette.CATPPUCCIN,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
 
     // Memoize color scheme computation to avoid recalculation on every recomposition
     // This eliminates color processing from the main thread during draw cycles
-    val colorScheme = remember(darkTheme, dynamicColor, amoledMode, context) {
+    val colorScheme = remember(darkTheme, dynamicColor, amoledMode, themePalette, context) {
         when {
         amoledMode && darkTheme && dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
                 // Pre-computed AMOLED scheme with dynamic colors - zero runtime cost
@@ -141,11 +154,11 @@ fun DroidspacesTheme(
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         amoledMode && darkTheme -> {
-                // Pre-computed static AMOLED scheme - zero runtime cost
-                AmoledColorCache.createStaticAmoledScheme()
+                // Pre-computed static AMOLED scheme using selected palette
+                AmoledColorCache.createStaticAmoledScheme(themePalette)
         }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+        darkTheme -> darkColorSchemeFor(themePalette)
+        else -> lightColorSchemeFor(themePalette)
         }
     }
 

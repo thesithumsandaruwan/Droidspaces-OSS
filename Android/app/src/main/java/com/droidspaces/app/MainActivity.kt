@@ -132,7 +132,8 @@ private fun ThemeWrapper(content: @Composable () -> Unit) {
     DroidspacesTheme(
         darkTheme = themeState.darkTheme,
         dynamicColor = themeState.useDynamicColor,
-        amoledMode = themeState.amoledMode
+        amoledMode = themeState.amoledMode,
+        themePalette = themeState.themePalette
     ) {
         content()
     }

@@ -39,6 +39,9 @@ fun rememberThemeState(): ThemeState {
             }
         )
     }
+    var themePalette by remember {
+        mutableStateOf(ThemePalette.fromName(prefsManager.themePalette))
+    }
 
     // Register SharedPreferences listener to detect changes
     DisposableEffect(prefsManager) {
@@ -55,6 +58,9 @@ fun rememberThemeState(): ThemeState {
                     } else {
                         false
                     }
+                }
+                "theme_palette" -> {
+                    themePalette = ThemePalette.fromName(prefsManager.themePalette)
                 }
             }
         }
@@ -73,12 +79,13 @@ fun rememberThemeState(): ThemeState {
     val effectiveAmoledMode = amoledMode && effectiveDarkTheme // AMOLED only works with dark theme
 
     // Return state that triggers recomposition when any theme preference changes
-    return remember(followSystemTheme, darkTheme, amoledMode, useDynamicColor, systemDark) {
+    return remember(followSystemTheme, darkTheme, amoledMode, useDynamicColor, systemDark, themePalette) {
         ThemeState(
             followSystemTheme = followSystemTheme,
             darkTheme = effectiveDarkTheme,
             amoledMode = effectiveAmoledMode,
-            useDynamicColor = useDynamicColor
+            useDynamicColor = useDynamicColor,
+            themePalette = themePalette
         )
     }
 }
@@ -87,6 +94,6 @@ data class ThemeState(
     val followSystemTheme: Boolean,
     val darkTheme: Boolean,
     val amoledMode: Boolean,
-    val useDynamicColor: Boolean
+    val useDynamicColor: Boolean,
+    val themePalette: ThemePalette
 )
-
